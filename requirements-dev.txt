@@ -1,0 +1,2 @@
+# Used for package schema validation; runtime dependencies are separate.
+jsonschema>=4.23,<5
