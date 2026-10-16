@@ -19,8 +19,9 @@ IDENTIFIER = "com.github.coprod-llc.kicad-project-manager"
 def merge_packages(packages: list[dict]) -> dict:
     if not packages:
         raise ValueError("Cannot publish an empty catalog")
-    result = deepcopy(packages[-1])
     versions = {}
+    latest_package = None
+    latest_version = (-1, -1, -1)
     for package in packages:
         if package["identifier"] != IDENTIFIER:
             raise ValueError("Unexpected package identifier")
@@ -31,6 +32,12 @@ def merge_packages(packages: list[dict]) -> dict:
             if existing and existing != version:
                 raise ValueError("A published version must not be replaced with different metadata")
             versions[version["version"]] = deepcopy(version)
+            number = tuple(map(int, version["version"].split('.')))
+            if number >= latest_version:
+                latest_package, latest_version = package, number
+    if latest_package is None:
+        raise ValueError('Cannot publish a catalog without versions')
+    result = deepcopy(latest_package)
     result["versions"] = sorted(
         versions.values(), key=lambda item: tuple(map(int, item["version"].split("."))), reverse=True
     )
@@ -84,7 +91,7 @@ def write_catalog(package: dict, destination: Path, base_url: str, timestamp: in
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>KiCad Project Manager</title><body style="font:18px system-ui;max-width:780px;margin:4em auto;padding:1em">'
         '<h1>KiCad Project Manager</h1>'
-        '<p>A project companion for KiCad 9. This preview inspects the active project.</p>'
+        '<p>A project companion for KiCad 9. Edit KiBot metadata, restore a missing workflow, and select project status.</p>'
         f'<p>Latest packaged version: <strong>{version}</strong> (testing).</p>'
         '<p>In KiCad’s Plugin and Content Manager, choose Manage and add this repository URL:</p>'
         f'<p><a href="{feed_url}">{feed_url}</a></p>'

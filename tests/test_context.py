@@ -29,6 +29,14 @@ class ContextTests(unittest.TestCase):
         with self.assertRaises(ContextError):
             context_from_document(document(board="untitled.kicad_pcb"), "9.0.9")
 
+    def test_setup_paths_are_relative_to_project_when_board_is_in_subdirectory(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'kibot_yaml').mkdir()
+            (root / 'kibot_yaml/kibot_main.yaml').write_text('kibot: {version: 1}')
+            context = context_from_document(document(folder, 'sample', 'boards/sample.kicad_pcb'), '9.0.9')
+            self.assertTrue(context.kibot_config_present)
+
     def test_standalone_board_does_not_invent_project(self):
         with TemporaryDirectory() as folder:
             context = context_from_document(document(board=str(Path(folder) / "standalone.kicad_pcb")), "9.0.9")

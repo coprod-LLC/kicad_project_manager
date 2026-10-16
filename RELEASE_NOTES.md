@@ -1,11 +1,21 @@
-Initial preview: plugin shell and release distribution.
+Project setup preview for KiCad 9.
 
-- Native wxPython window launched from KiCad 9's PCB Editor.
-- Read-only project and board detection using the launching editor's IPC session.
-- Plugin/KiCad version display, KiBot/CI presence checks, refresh, and actionable connection errors.
-- Development symlink helper and cross-platform setup documentation.
-- Versioned PCM packages, checksums, and a public update feed.
+- Edit project name, board name, company, multiple authors, Git URL, and logo path.
+- Suggest values from the project and Git while retaining existing metadata.
+- Restore a missing `.github/workflows/ci.yaml` from a local Coprod or KDT template.
+- Remember the template folder per user, outside the project and public plugin.
+- Select DRAFT, PRELIMINARY, or CHECKED; version tags still select RELEASED.
+- Preview exact edits, back up original files, detect external changes, and roll
+  back a failed save. Existing comments and workflow branch policies are retained.
+- Preserve earlier PCM versions and use the newest package description on redeploy.
 
-Project editing, rules/stackup application, and KiBot execution are not included
-in this preview. Runtime GUI validation is currently on Linux; macOS and Windows
-have automated Python/package checks and need manual KiCad integration testing.
+KiBot updates document text variables on the next CI run. This release does not
+change board/project files, run KiBot, commit, push, or apply rules/stackups.
+
+The supported template fields must be single-line scalars. Because KiBot performs
+literal text substitution, some punctuation (including apostrophes and
+colon-space sequences) requires template changes and is rejected before saving.
+
+Validation includes disposable copies of both templates, setup/rollback tests,
+Linux GUI preview/cancel/apply/reload, and cross-platform Python/package checks.
+macOS and Windows still need manual KiCad GUI integration testing.

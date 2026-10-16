@@ -45,6 +45,7 @@ def context_from_document(document: Any, version: str) -> ProjectContext:
     if name and directory:
         project_name = name if name.endswith(".kicad_pro") else name + ".kicad_pro"
         project_file = str(Path(directory) / project_name)
+    setup_directory = Path(project_file).parent if project_file else board.parent
     return ProjectContext(
         kicad_version=version,
         project_name=name.removesuffix(".kicad_pro") if name else "Standalone board",
@@ -53,8 +54,8 @@ def context_from_document(document: Any, version: str) -> ProjectContext:
         board_file=str(board),
         project_saved=bool(project_file and Path(project_file).is_file()),
         board_saved=board.is_file(),
-        kibot_config_present=(board.parent / "kibot_yaml" / "kibot_main.yaml").is_file(),
-        workflow_present=(board.parent / ".github" / "workflows" / "ci.yaml").is_file(),
+        kibot_config_present=(setup_directory / "kibot_yaml" / "kibot_main.yaml").is_file(),
+        workflow_present=(setup_directory / ".github" / "workflows" / "ci.yaml").is_file(),
     )
 
 
