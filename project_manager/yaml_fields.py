@@ -21,6 +21,14 @@ class Field:
     end: int
 
 
+def plain_text(value: str) -> bool:
+    """Conservative plain-string subset shared by YAML 1.1 and 1.2 readers."""
+    return bool(value and value == value.strip()
+                and (value[0].isalpha() or value[0] == '_')
+                and value.lower() not in {'y', 'n', 'yes', 'no', 'on', 'off', 'true', 'false', 'null'}
+                and not re.search(r':(?:\s|$)|\s#|[\[\]{}\x85\u2028\u2029]', value))
+
+
 def scalar(raw: str) -> tuple[str, int]:
     """Return a scalar's text and its end offset, excluding trailing comments."""
     if not raw or raw[0] in '|>&*!{[':
@@ -121,7 +129,13 @@ class ScalarBlock:
             value = values[key]
             if not isinstance(value, str) or any(ord(c) < 32 for c in value):
                 raise SetupError(f'{key} must be single-line text.')
-            encoded = "'" + value.replace("'", "''") + "'"
+            original = self.text[field.start:field.end]
+            if original.startswith('"'):
+                encoded = json.dumps(value, ensure_ascii=False)
+            elif not original.startswith("'") and plain_text(value):
+                encoded = value
+            else:
+                encoded = "'" + value.replace("'", "''") + "'"
             result = result[:field.start] + encoded + result[field.end:]
         updated = result.encode('utf-8')
         return updated

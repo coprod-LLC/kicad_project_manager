@@ -17,9 +17,50 @@ prototype (original step 3).
   left for the later API feasibility work.
 - Public-template KiBot integration test; private Coprod fixtures remain local.
 
-## Next: step 3 feasibility prototype (not implemented)
+## Local refinements in v0.3.0
 
-Before implementing the standards browser, establish a safe KiCad 9 application
+- Apply directly from Project Setup, with Preview Changes remaining optional.
+  Both paths keep validation, active-project checks, backups, and conflict checks.
+- Preserve existing YAML scalar quoting style where safe instead of adding
+  single quotes to every edited field. Existing quoted values remain valid.
+- Clarify that supported templates select RELEASED on version tags and do not
+  require the manually selected status to be CHECKED first.
+
+## Standards catalog and application prototype
+
+Use one standalone standards folder per computer, outside individual PCB
+projects. The initial source is a local folder; later it can be a private Git
+checkout. No per-project submodule is required.
+
+1. Done in v0.3.0: Settings dialog with a standards-folder picker, catalog
+   schema validation, and the backup location with an Open Backups button.
+2. Done in v0.3.0: Standards tab with separate Rules and Stackup dropdowns,
+   dependency details, and a read-only comparison with the saved project files.
+   Tests use synthetic data; company examples stay outside this repository.
+3. Done in v0.3.0: apply selected presets to saved files. Custom rules update
+   one marked company-rules block and leave every other rule untouched; KiCad's
+   later-rule priority means project rules below that block still win. Constraints
+   and named net classes are merged in `.kicad_pro`. Stackup edits copper,
+   dielectrics, copper finish, and thickness, and keeps mask, silk, and paste
+   unless the preset includes them. Removing a copper layer the board still uses
+   is refused. `kpm-standards.json` stores the preset id, source file hashes, and
+   the standards commit when the folder is a Git checkout. Apply checks editor
+   lock files and file hashes, then uses the existing backup and rollback.
+   The installed kicad-python client can read net classes and stackup, and it can
+   set enabled layers, but it has no setters for custom rules, constraints, net
+   classes, or the physical stackup, so this step edits the saved files instead
+   of the open editor.
+4. Add Git URL, branch/tag, local checkout, and an explicit Fetch/Update action to
+   Settings. Reuse the user's Git authentication. Work offline from the local
+   checkout; catalog updates must never automatically reapply project standards.
+
+Draft extracted snapshots are preparation data, not approved fabrication limits
+or an implemented importer. Review dependencies and comment/value discrepancies
+before turning a project snapshot into a reusable company preset.
+
+### KiCad 9 application feasibility
+
+Before enabling standards application, establish a safe KiCad 9 application
 path on disposable project copies. The IPC API exposes some settings for reading
 without corresponding setters. An in-memory editor may overwrite external edits.
 
@@ -44,9 +85,9 @@ without corresponding setters. An in-memory editor may overwrite external edits.
    Compare DRC results before/after without treating the preset as approval of
    the electrical design.
 
-Deliverable: a tested recommendation for the application mechanism and its user
-interaction, plus evidence of preserved project data. Review it before building
-the full standards feature.
+The file-edit mechanism above is the chosen path. Still confirm in KiCad, on a
+disposable copy: closing the editors, applying, reopening, a second apply with
+no further diff, and a DRC spot-check. That check does not approve the board.
 
 ## Later increments
 

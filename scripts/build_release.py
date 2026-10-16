@@ -16,6 +16,10 @@ PAYLOAD = (
     "project_manager/__init__.py", "project_manager/context.py", "project_manager/ui.py",
     "project_manager/yaml_fields.py", "project_manager/setup.py",
     "project_manager/preferences.py", "project_manager/setup_ui.py",
+    "project_manager/settings_ui.py", "project_manager/standards.py",
+    "project_manager/standards_ui.py", "project_manager/standards_apply.py",
+    "project_manager/sexpr.py", "project_manager/json_text.py",
+    "project_manager/instance.py",
     "resources/icon.png",
 )
 

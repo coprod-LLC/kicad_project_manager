@@ -36,12 +36,12 @@ def project_path(root: Path, relative: str) -> Path:
     return path
 
 
-def read_file(root: Path, relative: str) -> bytes | None:
+def read_file(root: Path, relative: str, limit: int = MAX_FILE_SIZE) -> bytes | None:
     path = project_path(root, relative)
     if not path.exists():
         return None
-    if not path.is_file() or path.stat().st_size > MAX_FILE_SIZE:
-        raise SetupError(f'{relative} must be a regular configuration file smaller than 2 MB.')
+    if not path.is_file() or path.stat().st_size > limit:
+        raise SetupError(f'{relative} must be a regular configuration file smaller than {max(limit // (1024 * 1024), 1)} MB.')
     return path.read_bytes()
 
 
@@ -191,7 +191,7 @@ def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str,
 def assert_unchanged(snapshot: Snapshot) -> None:
     for relative, original in ((CONFIG, snapshot.config), (WORKFLOW, snapshot.workflow)):
         if read_file(snapshot.root, relative) != original:
-            raise SetupError(f'{relative} changed since it was loaded. Refresh and preview again.')
+            raise SetupError(f'{relative} changed since it was loaded. Refresh and review the values again.')
 
 
 def _replace(path: Path, data: bytes, mode: int) -> None:
@@ -208,11 +208,13 @@ def _replace(path: Path, data: bytes, mode: int) -> None:
             os.unlink(temporary)
 
 
-def apply(plan: Plan, storage: Path | None = None) -> Path | None:
-    if not plan.changes:
-        assert_unchanged(plan.snapshot)
+def commit_changes(root: Path, changes: tuple[Change, ...], storage: Path | None = None, *,
+                   limit: int = MAX_FILE_SIZE, verify=None) -> Path | None:
+    """Back up, write, and roll back a set of project files. ``verify`` re-reads them first."""
+    verify = verify or (lambda: None)
+    if not changes:
+        verify()
         return None
-    root = plan.snapshot.root
     folder = (storage or data_directory()) / 'backups' / hashlib.sha256(str(root).encode()).hexdigest()[:16]
     folder.mkdir(parents=True, exist_ok=True)
     lock = folder / 'apply.lock'
@@ -226,12 +228,12 @@ def apply(plan: Plan, storage: Path | None = None) -> Path | None:
     backup = None
     modes = {}
     try:
-        assert_unchanged(plan.snapshot)
+        verify()
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
         backup = folder / stamp
         backup.mkdir()
         manifest = {'project': str(root), 'files': []}
-        for change in plan.changes:
+        for change in changes:
             path = project_path(root, change.relative)
             modes[change.relative] = path.stat().st_mode & 0o777 if path.exists() else 0o644
             if change.before is not None:
@@ -241,10 +243,10 @@ def apply(plan: Plan, storage: Path | None = None) -> Path | None:
             manifest['files'].append({'path': change.relative, 'existed': change.before is not None,
                                       'after_sha256': hashlib.sha256(change.after).hexdigest()})
         (backup / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-        assert_unchanged(plan.snapshot)
-        for change in plan.changes:
+        verify()
+        for change in changes:
             path = project_path(root, change.relative)
-            if read_file(root, change.relative) != change.before:
+            if read_file(root, change.relative, limit) != change.before:
                 raise SetupError(f'{change.relative} changed during apply.')
             missing = []
             parent = path.parent
@@ -257,7 +259,7 @@ def apply(plan: Plan, storage: Path | None = None) -> Path | None:
             _replace(path, change.after, modes[change.relative])
             written.append(change)
         for change in written:
-            if read_file(root, change.relative) != change.after:
+            if read_file(root, change.relative, limit) != change.after:
                 raise SetupError(f'{change.relative} changed during verification.')
         return backup
     except Exception as exc:
@@ -265,7 +267,7 @@ def apply(plan: Plan, storage: Path | None = None) -> Path | None:
         for change in reversed(written):
             try:
                 path = project_path(root, change.relative)
-                if read_file(root, change.relative) != change.after:
+                if read_file(root, change.relative, limit) != change.after:
                     raise SetupError('An external edit prevents automatic restoration.')
                 if change.before is None:
                     path.unlink()
@@ -282,6 +284,11 @@ def apply(plan: Plan, storage: Path | None = None) -> Path | None:
             raise SetupError(f'Apply failed. Restore {", ".join(recovery_errors)} from {backup}.') from exc
         if isinstance(exc, SetupError):
             raise
-        raise SetupError(f'Could not save setup; original files were retained. Backup: {backup or "not created"}. {exc}') from exc
+        raise SetupError(f'Could not save the project files; original files were retained. Backup: {backup or "not created"}. {exc}') from exc
     finally:
         lock.unlink()
+
+
+def apply(plan: Plan, storage: Path | None = None) -> Path | None:
+    return commit_changes(plan.snapshot.root, plan.changes, storage,
+                          verify=lambda: assert_unchanged(plan.snapshot))

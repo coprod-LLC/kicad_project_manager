@@ -2,12 +2,12 @@
 
 A small, native wxPython IPC companion for KiCad 9 projects and KiBot workflows.
 
-**Current preview: project setup, metadata editing, and PCM release distribution.**
-The window connects to the launching PCB Editor and offers an Overview and a
-Project Setup form. It edits KiBot configuration and workflow files after an
-explicit preview; it does not modify the board or KiCad project file.
+**Current preview: project setup, standards presets, and PCM release distribution.**
+The window connects to the launching PCB Editor. Project Setup edits KiBot
+configuration and workflow files. Standards can update saved design rules and
+stackup after the PCB and schematic editors are closed.
 
-Rules/stackup presets and GitHub Actions controls are planned. See
+GitHub Actions controls are planned. See
 [the roadmap](docs/roadmap.md). Public plugin code is independent
 of any company's private templates, standards, and PCB repositories.
 
@@ -43,16 +43,23 @@ automatically generated source ZIP.
    template placeholders receive suggestions from project filenames and Git.
 3. Edit project name, board name, company, authors (one per line), Git web URL,
    and logo path. Authors are stored together in the existing `DESIGNER` field.
-4. If the workflow is missing, select **Restore missing workflow** and browse to
-   your local template checkout. The folder is remembered on this computer.
-   An existing workflow is never replaced by the template.
+4. If the GitHub workflow is missing, the Overview shows **Not found** in red.
+   Choose **Restore missing .github/workflows/ci.yaml from a template**. The folder browser
+   opens in KiCad's user template directory (or the nearest existing folder).
+   An existing workflow is never replaced. The copied file keeps the template's
+   status and branch policy.
 5. Select **DRAFT**, **PRELIMINARY**, or **CHECKED**. This changes
    `env.kibot_variant`; **RELEASED** remains controlled by version tags.
-6. Choose **Preview Changes…**, review the diff, then **Apply Changes**.
+   Status stays unavailable until the workflow exists.
+6. Choose **Apply** to save directly, or **Preview Changes…** to review the diff
+   before choosing **Apply Changes**. Both paths validate changes and create backups.
 
 The editable files are `kibot_yaml/kibot_main.yaml` and
 `.github/workflows/ci.yaml`. Comments, unrelated settings, line endings, and the
-selected template's branch policies are preserved. Unexpected or ambiguous YAML
+selected template's branch policies are preserved. Edited values keep their plain,
+single-quoted, or double-quoted style where safe. Quotes added around text by older
+versions are valid YAML and do not become part of the value; they need no cleanup.
+Unexpected or ambiguous YAML
 layouts are rejected rather than rewritten. If another program changes either
 file while the form is open, Refresh and review again. The active editor is also
 checked immediately before applying changes.
@@ -60,6 +67,8 @@ checked immediately before applying changes.
 KiBot propagates metadata into project text variables and generated documents on
 the next CI run. Saving setup here does not commit, push, trigger Actions, or mark
 an electrical design as verified. The status chooses which CI checks/outputs run.
+The supported templates do not require CHECKED before a release: a matching
+version tag selects RELEASED, which runs ERC/DRC as part of generating outputs.
 
 **Template syntax limitation:** these templates substitute metadata as literal
 text into both plain and single-quoted YAML. New values containing apostrophes,
@@ -83,6 +92,47 @@ original files back to their project-relative paths, and remove a newly created
 workflow if appropriate. Review later edits before restoring. An interrupted
 multi-file save automatically restores files it wrote when no external edit has
 intervened.
+
+## Standards
+
+1. Choose **Settings…** and select a standards folder containing `catalog.json`
+   (a plain folder or an existing Git checkout). It is remembered on this computer.
+   Settings also shows the backup folder, with an **Open Backups** button.
+2. Open the **Standards** tab and choose a Rules preset, a Stackup preset, or both.
+   The details box lists the netclasses, named rule areas, and named nets a rules
+   preset depends on.
+3. Save the project in KiCad, then choose **Compare with Saved Project** or
+   **Preview Changes…**. **Apply** writes the same result without the preview.
+4. Close the PCB editor and the schematic editor before applying, and leave this
+   window open. Reopen the project afterward. An editor that is still open will
+   overwrite the apply the next time it saves. Opening the plugin again while its
+   window is already open shows a warning instead of a second window.
+
+Custom rules are not replaced as a whole file. The plugin owns one marked block:
+
+```text
+# kicad_project_manager: begin company rules
+# kicad_project_manager: end company rules
+```
+
+Rules outside that block, including courtyard overrides and voltage domains, are
+left untouched. KiCad gives later rules priority, so a project rule below the
+block overrides the company rule. The first apply inserts the block just after
+`(version 1)`, which puts existing project rules after it. A later apply updates
+the block where it already stands.
+
+Constraints update matching keys in `board.design_settings.rules`. Preset net
+classes are updated by name; other classes and net assignments stay. Stackup
+updates copper, dielectrics, copper finish, and board thickness. Mask, silk, and
+paste layers stay unless the preset includes them. A copper layer the board still
+uses is not removed.
+
+Each apply records the preset id, source file hashes, and the standards checkout
+commit when that folder is a Git repository, in `kpm-standards.json` next to the
+project. That file is the provenance for a later drift check. Originals are
+backed up with the same restore path as project setup. A second apply of the
+same presets makes no further file changes. Company presets are not part of this
+public repository.
 
 ## Local development
 
@@ -141,7 +191,7 @@ In a development virtual environment:
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.2.0
+python -m scripts.build_release --tag v0.3.0
 ```
 
 The ZIP uses an explicit file allowlist. Tests verify archive contents, entrypoint
@@ -171,8 +221,8 @@ Use short feature branches and pull requests into `main`. To release:
 3. Tag that commit with `vMAJOR.MINOR.PATCH` and push the tag.
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The release workflow checks out the exact tag, tests and packages it, publishes a
@@ -194,7 +244,11 @@ Pages deployment can be retried through the workflow's manual tag input.
 - **KiCad 10+:** this initial release intentionally supports KiCad 9 only.
 - **Missing KiBot configuration:** start with a compatible Coprod or KDT template
   project. The plugin repairs a missing workflow, not an entire missing template.
-- **Missing CI workflow:** select your local template folder in Project Setup.
+- **Missing CI workflow:** on the Overview, choose **Restore missing .github/workflows/ci.yaml from a template**
+  and select the template root. The browser starts in KiCad's user template folder:
+  `~/.local/share/kicad/9.0/template` on Linux, `~/Documents/KiCad/9.0/template` on macOS,
+  and `%USERPROFILE%\\Documents\\KiCad\\9.0\\template` on Windows. `KICAD_USER_TEMPLATE_DIR`
+  overrides that location.
 - **Official PCM feed errors:** if `repository.kicad.org` is unavailable, KiCad 9
   can use the [direct official v1 feed](https://gitlab.com/kicad/addons/repository/-/raw/main/repository-v1.json).
   The Project Manager feed above is separate.

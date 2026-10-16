@@ -7,7 +7,7 @@
   "actions": [{
     "identifier": "open",
     "name": "KiCad Project Manager",
-    "description": "Set up project metadata and KiBot workflow",
+    "description": "Set up project metadata, KiBot workflow, and company standards",
     "show-button": true,
     "scopes": ["pcb"],
     "entrypoint": "run_project_manager.py",

@@ -36,6 +36,9 @@ def main() -> int:
         )
         return 1
     app = wx.App(False)
+    from project_manager.instance import ensure_single_instance
+    if not ensure_single_instance(app):
+        return 0
     frame = ProjectManagerFrame(provider)
     frame.Show()
     app.MainLoop()

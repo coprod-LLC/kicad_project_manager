@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from project_manager import setup
-from project_manager.preferences import load_template, save_template
+from project_manager.preferences import kicad_user_template_directory, load_template, save_template
 from project_manager.yaml_fields import ScalarBlock, SetupError
 from tests.fixtures import CONFIG_TEXT, WORKFLOW_TEXT, sample_project
 
@@ -17,7 +17,29 @@ class FieldsTests(unittest.TestCase):
         block = ScalarBlock(data, 'definitions', setup.METADATA)
         self.assertEqual(block.replace(block.values), data)
         changed = block.replace({'PROJECT_NAME': 'Café controller'})
-        self.assertEqual(changed, data.replace(b'PROJECT_NAME: Project Name', "PROJECT_NAME: 'Café controller'".encode()))
+        self.assertEqual(changed, data.replace(b'PROJECT_NAME: Project Name', 'PROJECT_NAME: Café controller'.encode()))
+
+    def test_edits_preserve_plain_single_and_double_quoted_styles(self):
+        for before, after in [('DRAFT', 'CHECKED'), ("'DRAFT'", "'CHECKED'"),
+                              ('"DRAFT"', '"CHECKED"')]:
+            with self.subTest(before=before):
+                data = f'env:\n  field: {before}  # keep\n'.encode()
+                changed = ScalarBlock(data, 'env', ('field',)).replace({'field': 'CHECKED'})
+                self.assertEqual(changed, f'env:\n  field: {after}  # keep\n'.encode())
+
+    def test_plain_fields_gain_quotes_only_for_ambiguous_or_unsupported_text(self):
+        for value in ['yes', 'null', '42', '2026-10-16', '.nan', '', ' spaced ',
+                      'a: b', 'a # b', '[list]', '&alias', "'quoted'"]:
+            with self.subTest(value=value):
+                changed = ScalarBlock(b'env:\n  field: old\n', 'env', ('field',)).replace({'field': value})
+                self.assertTrue(changed.startswith(b"env:\n  field: '"))
+                self.assertEqual(ScalarBlock(changed, 'env', ('field',)).values['field'], value)
+
+    def test_double_quoted_edits_escape_quotes_and_backslashes(self):
+        value = 'A "quoted" path \\ folder'
+        changed = ScalarBlock(b'env:\n  field: "old"\n', 'env', ('field',)).replace({'field': value})
+        self.assertEqual(changed, ('env:\n  field: ' + json.dumps(value) + '\n').encode())
+        self.assertEqual(ScalarBlock(changed, 'env', ('field',)).values['field'], value)
 
     def test_quoted_scalars_roundtrip_and_comment_hash_in_value(self):
         data = b"env:\n  field: 'Alice''s #1' # preserved\n"
@@ -59,7 +81,7 @@ class SetupTests(unittest.TestCase):
         before = setup.read_setup(self.root)
         board = (self.root / 'sample.kicad_pcb').read_bytes()
         plan = setup.prepare(before, self.values(before), 'PRELIMINARY')
-        self.assertIn("+  PROJECT_NAME: 'Example controller'", plan.diff())
+        self.assertIn('+  PROJECT_NAME: Example controller', plan.diff())
         self.assertEqual(setup.read_setup(self.root), before)
         backup = setup.apply(plan, self.store)
         self.assertEqual((backup / setup.CONFIG).read_bytes(), before.config)
@@ -69,6 +91,7 @@ class SetupTests(unittest.TestCase):
         after = setup.read_setup(self.root)
         self.assertEqual(after.metadata, self.values(before))
         self.assertEqual(after.status, 'PRELIMINARY')
+        self.assertIn(b'kibot_variant: PRELIMINARY  # existing comment', after.workflow)
         self.assertIn(b"branches: [dev]", after.workflow)
         self.assertIn(b"'@KEEP_THIS@'", after.config)
         self.assertEqual(setup.prepare(after, after.metadata, after.status).changes, ())
@@ -206,6 +229,17 @@ class SetupTests(unittest.TestCase):
                          (b'kibot_yaml/kibot_main.yaml', b'other.yaml')]:
             with self.subTest(new=new), self.assertRaises(SetupError):
                 setup.workflow_block(WORKFLOW_TEXT.encode().replace(old, new))
+
+    def test_kicad_user_template_directory_follows_the_operating_system(self):
+        assert_path = self.assertEqual
+        assert_path(kicad_user_template_directory({'KICAD_USER_TEMPLATE_DIR': '/custom/templates'}, 'linux'),
+                    Path('/custom/templates'))
+        assert_path(kicad_user_template_directory({'XDG_DATA_HOME': '/data'}, 'linux'),
+                    Path('/data/kicad/9.0/template'))
+        assert_path(kicad_user_template_directory({'HOME': '/Users/ada'}, 'darwin'),
+                    Path('/Users/ada/Documents/KiCad/9.0/template'))
+        assert_path(kicad_user_template_directory({'USERPROFILE': 'C:/Users/ada'}, 'win32'),
+                    Path('C:/Users/ada/Documents/KiCad/9.0/template'))
 
     def test_local_template_preference_roundtrip(self):
         self.assertEqual(load_template(self.store), '')

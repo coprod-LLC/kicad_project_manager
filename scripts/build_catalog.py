@@ -91,7 +91,7 @@ def write_catalog(package: dict, destination: Path, base_url: str, timestamp: in
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>KiCad Project Manager</title><body style="font:18px system-ui;max-width:780px;margin:4em auto;padding:1em">'
         '<h1>KiCad Project Manager</h1>'
-        '<p>A project companion for KiCad 9. Edit KiBot metadata, restore a missing workflow, and select project status.</p>'
+        '<p>A project companion for KiCad 9. Edit KiBot metadata, restore a missing workflow, select project status, and apply company rules and stackup.</p>'
         f'<p>Latest packaged version: <strong>{version}</strong> (testing).</p>'
         '<p>In KiCad’s Plugin and Content Manager, choose Manage and add this repository URL:</p>'
         f'<p><a href="{feed_url}">{feed_url}</a></p>'
