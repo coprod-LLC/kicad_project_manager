@@ -1,7 +1,21 @@
 # Roadmap
 
-The first milestone is limited to the read-only IPC shell and public release
-distribution. No preset application or project-editing code is included.
+Steps 1 and 2 delivered the IPC shell and public release distribution in v0.1.0.
+Project setup (original step 4) was moved ahead of the rules/stackup feasibility
+prototype (original step 3).
+
+## Project setup — v0.2.0 preview
+
+- Native form for project/board names, company, authors, Git URL, and logo path.
+- Suggestions from filenames and Git only for blank/template placeholder values.
+- Restore a missing workflow from a locally selected template, preserving its
+  branch and release policies; remember the folder on this computer.
+- DRAFT/PRELIMINARY/CHECKED selection; tags still select RELEASED.
+- Explicit diff preview, local backups, external-edit checks, and rollback.
+- Preserve KiBot template syntax, comments, and unrelated configuration.
+- KiBot updates text variables when CI runs; live KiCad project/board writes are
+  left for the later API feasibility work.
+- Public-template KiBot integration test; private Coprod fixtures remain local.
 
 ## Next: step 3 feasibility prototype (not implemented)
 
@@ -36,8 +50,8 @@ the full standards feature.
 
 ## Later increments
 
-- Complete project setup: recover missing template dotfiles, edit metadata and
-  authors, synchronize text variables, and select DRAFT/PRELIMINARY/CHECKED.
+- Extend project setup: broader template migrations and live text-variable sync
+  once the safe KiCad save/reload path has been established.
 - Private standards catalog: compatible rules/stackup choices, pinned source
   commits, drift detection, previews, and restoration.
 - GitHub Actions: dispatch a pushed revision, view status, logs and outputs.

@@ -48,3 +48,33 @@ jobs:
         with:
           name: gui-preview
           path: .dev/gui.png
+  kibot:
+    name: KiBot metadata integration (KiCad 9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check out the public KDT test template
+        uses: actions/checkout@v4
+        with:
+          repository: nguyen-v/KDT_Hierarchical_KiBot
+          ref: c2cdb4242948451f3a5603813f4f55774d9e385f
+          path: .dev/kdt-template
+          persist-credentials: false
+      - name: Prepare a disposable project through the setup editor
+        run: python -m scripts.check_template prepare --template .dev/kdt-template --project .dev/ci-project
+      - name: Generate metadata with the official KiCad 9 KiBot image
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work/.dev/ci-project \
+            ghcr.io/inti-cmnb/kicad9_auto_full@sha256:4aabcd7d09ba3b605b9e9813b0ee41a8dbaa4fda777929e235a718f7d47f6113 \
+            sh -c 'git config --global --add safe.directory /work/.dev/ci-project && kibot -c kibot_yaml/kibot_main.yaml -b KDT_Hierarchical_KiBot.kicad_pcb -e KDT_Hierarchical_KiBot.kicad_sch -g variant=PRELIMINARY -s draw_fancy_stackup,erc,drc,update_xml md_readme'
+      - name: Verify generated metadata and report
+        run: python -m scripts.check_template verify --project .dev/ci-project
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kibot-metadata-report
+          path: .dev/ci-project/README.md

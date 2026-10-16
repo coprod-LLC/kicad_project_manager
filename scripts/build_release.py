@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = (
     "plugin.json", "requirements.txt", "run_project_manager.py", "LICENSE", "README.md",
     "project_manager/__init__.py", "project_manager/context.py", "project_manager/ui.py",
+    "project_manager/yaml_fields.py", "project_manager/setup.py",
+    "project_manager/preferences.py", "project_manager/setup_ui.py",
     "resources/icon.png",
 )
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://go.kicad.org/pcm/schemas/v1",
   "name": "KiCad Project Manager",
-  "description": "Inspect the active KiCad project; foundation for project setup and KiBot workflows.",
-  "description_full": "A native wxPython IPC companion for KiCad 9. This preview displays the active project, board, KiCad version, and presence of KiBot/CI files. It does not modify project files. Enable the KiCad API in Preferences → Plugins. Linux requires Python pip, venv, and distro-provided wxPython. Project editing, standards presets, and KiBot controls are planned for later releases.",
+  "description": "Edit KiBot project metadata, restore a missing workflow, and select project status.",
+  "description_full": "A native wxPython IPC companion for KiCad 9. Inspect the active project, edit metadata and authors, restore a missing CI workflow from a local Coprod or KDT template, and select DRAFT/PRELIMINARY/CHECKED. Preview changes before applying, with local backups and conflict detection. Enable the KiCad API in Preferences → Plugins. Linux requires Python pip, venv, and distro-provided wxPython. Rules/stackup presets and KiBot execution controls are planned for later releases.",
   "identifier": "com.github.coprod-llc.kicad-project-manager",
   "type": "plugin",
   "author": {"name": "coprod LLC", "contact": {"web": "https://github.com/coprod-LLC/kicad_project_manager"}},

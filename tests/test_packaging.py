@@ -45,8 +45,10 @@ class PackageTests(unittest.TestCase):
             first = json.loads(metadata_path.read_text())
             next_version = deepcopy(first)
             next_version["versions"][0]["version"] = "0.10.0"
+            next_version['description'] = 'Latest package description'
             package = merge_packages([first, next_version, first])
             self.assertEqual([entry["version"] for entry in package["versions"]], ["0.10.0", source_version()])
+            self.assertEqual(package['description'], 'Latest package description')
             write_catalog(package, root / "site", "https://example.org/plugins", 12345)
             repository = json.loads((root / "site/repository.json").read_text())
             actual_hash = hashlib.sha256((root / "site/packages.json").read_bytes()).hexdigest()
