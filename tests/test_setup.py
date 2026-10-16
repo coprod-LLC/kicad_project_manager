@@ -36,6 +36,12 @@ class FieldsTests(unittest.TestCase):
         with self.assertRaises(SetupError):
             ScalarBlock(b'env:\n  field: a\nenv:\n  field: b\n', 'env', ('field',))
 
+    def test_alternate_key_spellings_cannot_hide_duplicate_managed_values(self):
+        for data in [b"env:\n  field: a\n  'field': b\n", b'env:\n  field: a\n  field : b\n',
+                     b'env:\n  field: a\n"env":\n  field: b\n', b'env:\n  field: a\nenv: {field: b}\n']:
+            with self.subTest(data=data), self.assertRaises(SetupError):
+                ScalarBlock(data, 'env', ('field',))
+
 
 class SetupTests(unittest.TestCase):
     def setUp(self):

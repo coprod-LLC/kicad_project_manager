@@ -60,7 +60,9 @@ class ScalarBlock:
             raise SetupError('Configuration must use UTF-8 encoding.') from exc
         header = re.compile(r'^\ufeff?' + re.escape(block) + r':[ \t]*(?:#[^\r\n]*)?\r?$', re.M)
         headers = list(header.finditer(self.text))
-        if len(headers) != 1:
+        named_blocks = re.findall(r'^\ufeff?(?:' + re.escape(block) + r"|'" + re.escape(block)
+                                  + r"'|\"" + re.escape(block) + r'\")[ \t]*:', self.text, re.M)
+        if len(headers) != 1 or len(named_blocks) != 1:
             raise SetupError(f'Expected exactly one top-level {block}: block.')
         start = headers[0].end()
         end = len(self.text)
@@ -79,7 +81,9 @@ class ScalarBlock:
         indent = min((len(s) - len(s.lstrip(' ')) for _, s in children), default=0)
         self.fields: dict[str, Field] = {}
         for offset, content in children:
-            match = re.match(r' {' + str(indent) + r'}([A-Za-z_][\w]*):[ \t]*', content)
+            if re.match(r' {' + str(indent) + r'}[\'\"](?:' + '|'.join(map(re.escape, keys)) + r')[\'\"][ \t]*:', content):
+                raise SetupError('Quoted managed keys are unsupported; use one unquoted key per field.')
+            match = re.match(r' {' + str(indent) + r'}([A-Za-z_][\w]*)[ \t]*:[ \t]*', content)
             if not match or match[1] not in keys:
                 continue
             key = match[1]

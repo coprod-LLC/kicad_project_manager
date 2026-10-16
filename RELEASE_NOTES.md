@@ -17,5 +17,7 @@ literal text substitution, some punctuation (including apostrophes and
 colon-space sequences) requires template changes and is rejected before saving.
 
 Validation includes disposable copies of both templates, setup/rollback tests,
-Linux GUI preview/cancel/apply/reload, and cross-platform Python/package checks.
+Linux GUI preview/cancel/apply/reload, real KiCad 9.0.9 project detection/apply,
+cross-platform Python/package checks, and a real KiBot run verifying every edited
+metadata value in project text variables and a generated report.
 macOS and Windows still need manual KiCad GUI integration testing.
