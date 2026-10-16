@@ -39,6 +39,12 @@ def main():
         report = root / 'kibot_resources/templates/readme.txt'
         report.write_text(''.join(key + ': ${' + key + '}\n' for key in EXPECTED)
                           + 'VARIANT: ${VARIANT}\n', encoding='utf-8')
+        # Recent KiBot reports collect all configured images by default. This
+        # metadata test does not need to render the entire manufacturing pack.
+        report_config = root / 'kibot_yaml/kibot_out_md_report.yaml'
+        contents = report_config.read_text(encoding='utf-8')
+        assert contents.count('    options:\n') == 1
+        report_config.write_text(contents.replace('    options:\n', "    options:\n      collect_images: 'no'\n"), encoding='utf-8')
         for command in [['init'], ['config', 'user.name', 'Integration Test'],
                         ['config', 'user.email', 'integration@example.org'],
                         ['add', '.'], ['commit', '-m', 'Synthetic setup integration project']]:

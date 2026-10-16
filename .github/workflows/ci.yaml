@@ -69,8 +69,8 @@ jobs:
       - name: Generate metadata with the official KiCad 9 KiBot image
         run: |
           docker run --rm -v "$PWD:/work" -w /work/.dev/ci-project \
-            ghcr.io/inti-cmnb/kicad9_auto_full:dev \
-            sh -c 'git config --global --add safe.directory /work/.dev/ci-project && kibot -c kibot_yaml/kibot_main.yaml -b KDT_Hierarchical_KiBot.kicad_pcb -e KDT_Hierarchical_KiBot.kicad_sch -g variant=PRELIMINARY -s draw_fancy_stackup,erc,drc,update_xml,include_table md_readme'
+            ghcr.io/inti-cmnb/kicad9_auto_full@sha256:4aabcd7d09ba3b605b9e9813b0ee41a8dbaa4fda777929e235a718f7d47f6113 \
+            sh -c 'git config --global --add safe.directory /work/.dev/ci-project && kibot -c kibot_yaml/kibot_main.yaml -b KDT_Hierarchical_KiBot.kicad_pcb -e KDT_Hierarchical_KiBot.kicad_sch -g variant=PRELIMINARY -s draw_fancy_stackup,erc,drc,update_xml md_readme'
       - name: Verify generated metadata and report
         run: python -m scripts.check_template verify --project .dev/ci-project
       - uses: actions/upload-artifact@v4
