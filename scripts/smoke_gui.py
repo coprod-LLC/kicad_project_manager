@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import os
 from pathlib import Path
 import sys
@@ -67,6 +68,7 @@ def main() -> int:
     started = time.monotonic()
     failures = []
     phase = 0
+    logged_phase = None
     source_script = template / 'kibot_resources/scripts/helper.py'
     source_script_before = source_script.read_bytes()
     small_status_height = 0
@@ -82,6 +84,7 @@ def main() -> int:
         assert bitmap.SaveFile(str(path), wx.BITMAP_TYPE_PNG)
 
     def check_result_colours():
+        print('GUI: checking Details colors', flush=True)
         coloured_project = sample_project(base / 'colour-project')
         config = coloured_project / 'kibot_yaml/kibot_main.yaml'
         config.write_bytes(config.read_bytes().replace(b'UNRELATED:', b'PROJECT_OVERRIDE:'))
@@ -114,6 +117,7 @@ def main() -> int:
                 assert dialog.files.GetItemTextColour(index) == expected[item.path]
 
     def review_template():
+        print('GUI: cancelling template review', flush=True)
         # Cancel first; then add missing files through the only template review path.
         def cancel_review():
             dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog)]
@@ -145,6 +149,7 @@ def main() -> int:
             dialog.GetEventHandler().ProcessEvent(event)
 
         wx.CallLater(150, accept_review)
+        print('GUI: applying template review', flush=True)
         frame._review_template(None)
 
     def assert_template_layout():
@@ -158,13 +163,16 @@ def main() -> int:
             assert frame.template_status.GetTextExtent(line).width <= status.width, 'Template status clips horizontally'
 
     def check():
-        nonlocal phase, before, small_status_height
+        nonlocal phase, before, small_status_height, logged_phase
         try:
             if time.monotonic() - started > 30:
                 raise AssertionError("GUI refresh timed out")
             if frame._busy or frame._overview_layout_pending or not calls:
                 wx.CallLater(100, check)
                 return
+            if logged_phase != phase:
+                print(f'GUI: phase {phase}', flush=True)
+                logged_phase = phase
             if phase == 0:
                 assert frame.fields["project_name"].GetValue() == "sample"
                 assert frame.notebook.GetSelection() == 0
@@ -379,7 +387,11 @@ def main() -> int:
             frame.Destroy()
 
     wx.CallLater(250, check)
+    # The phase timeout cannot fire while a failed callback leaves a modal dialog
+    # open. Bound the entire event loop and print thread stacks on a stuck test.
+    faulthandler.dump_traceback_later(45, exit=True)
     app.MainLoop()
+    faulthandler.cancel_dump_traceback_later()
     temporary.cleanup()
     if failures:
         raise SystemExit("GUI smoke failed: " + "; ".join(failures))

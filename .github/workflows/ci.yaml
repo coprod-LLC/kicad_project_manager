@@ -38,12 +38,13 @@ jobs:
       - run: python -m scripts.validate_package --schemas .dev/schemas
   gui:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Install native GUI test dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-wxgtk4.0 xvfb
       - name: Exercise the window and capture it
-        run: xvfb-run -a /usr/bin/python3 -m scripts.smoke_gui --output .dev/gui.png
+        run: xvfb-run -a /usr/bin/python3 -u -m scripts.smoke_gui --output .dev/gui.png
       - uses: actions/upload-artifact@v4
         with:
           name: gui-preview
