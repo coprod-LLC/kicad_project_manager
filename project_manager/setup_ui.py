@@ -50,11 +50,14 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         self.fields: dict[str, wx.TextCtrl] = {}
         for key, label in [('PROJECT_NAME', 'Project name'), ('BOARD_NAME', 'Board name'),
                            ('COMPANY', 'Company'), ('DESIGNER', 'Authors\n(one per line)'),
+                           ('REVIEWER', 'Reviewer (optional)'),
                            ('GIT_URL', 'Git web URL'), ('LOGO', 'Logo path')]:
             grid.Add(wx.StaticText(self, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
             field = wx.TextCtrl(self, style=wx.TE_MULTILINE if key == 'DESIGNER' else 0,
                                 size=(-1, 62) if key == 'DESIGNER' else wx.DefaultSize)
             field.SetToolTip('Path relative to the project, for example Logos/logo.png' if key == 'LOGO' else label.replace('\n', ' '))
+            if key == 'REVIEWER':
+                field.SetToolTip('Optional reviewer name. Older projects need a template upgrade to display it.')
             self.fields[key] = field
             grid.Add(field, 1, wx.EXPAND)
         grid.Add(wx.StaticText(self, label='Project status'), 0, wx.ALIGN_CENTER_VERTICAL)

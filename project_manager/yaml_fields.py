@@ -60,8 +60,10 @@ def scalar(raw: str) -> tuple[str, int]:
 
 
 class ScalarBlock:
-    def __init__(self, data: bytes, block: str, keys: tuple[str, ...]):
+    def __init__(self, data: bytes, block: str, keys: tuple[str, ...], *, optional: tuple[str, ...] = ()):
         self.data = data
+        self.optional = optional
+        keys = tuple(dict.fromkeys((*keys, *optional)))
         try:
             self.text = data.decode('utf-8')
         except UnicodeError as exc:
@@ -111,18 +113,34 @@ class ScalarBlock:
                 if len(continuation) - len(continuation.lstrip(' ')) > indent:
                     raise SetupError(f'{block}.{key}: multiline values are unsupported.')
                 break
-        missing = set(keys) - self.fields.keys()
+        self.insert_at = end
+        self.indent = indent or 2
+        missing = set(keys) - self.fields.keys() - set(optional)
         if missing:
             raise SetupError(f'Missing {block} field(s): {", ".join(sorted(missing))}.')
 
     @property
     def values(self) -> dict[str, str]:
-        return {key: field.value for key, field in self.fields.items()}
+        return {**dict.fromkeys(self.optional, ''),
+                **{key: field.value for key, field in self.fields.items()}}
 
-    def replace(self, values: dict[str, str]) -> bytes:
-        if values.keys() - self.fields.keys():
+    def replace(self, values: dict[str, str], *, prefer_plain: tuple[str, ...] = ()) -> bytes:
+        if values.keys() - self.fields.keys() - set(self.optional):
             raise SetupError('Attempt to change an unmanaged field.')
         result = self.text
+        additions = []
+        for key in self.optional:
+            if key not in self.fields and values.get(key, ''):
+                value = values[key]
+                if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+                    raise SetupError(f'{key} must be single-line text.')
+                encoded = value if key in prefer_plain and plain_text(value) else json.dumps(value, ensure_ascii=False)
+                additions.append(' ' * self.indent + key + ': ' + encoded)
+        if additions:
+            newline = '\r\n' if '\r\n' in result else '\n'
+            prefix = '' if result[:self.insert_at].endswith('\n') else newline
+            result = (result[:self.insert_at] + prefix + newline.join(additions) + newline
+                      + result[self.insert_at:])
         for key, field in sorted(self.fields.items(), key=lambda item: item[1].start, reverse=True):
             if key not in values or values[key] == field.value:
                 continue
@@ -130,7 +148,9 @@ class ScalarBlock:
             if not isinstance(value, str) or any(ord(c) < 32 for c in value):
                 raise SetupError(f'{key} must be single-line text.')
             original = self.text[field.start:field.end]
-            if original.startswith('"'):
+            if key in prefer_plain and plain_text(value):
+                encoded = value
+            elif original.startswith('"'):
                 encoded = json.dumps(value, ensure_ascii=False)
             elif not original.startswith("'") and plain_text(value):
                 encoded = value

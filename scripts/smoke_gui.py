@@ -198,6 +198,7 @@ def main() -> int:
                 panel.fields['PROJECT_NAME'].SetValue('Example controller')
                 panel.fields['BOARD_NAME'].SetValue('Control board')
                 panel.fields['DESIGNER'].SetValue('Alice Martin\nZoë Chen')
+                panel.fields['REVIEWER'].SetValue('Review Engineer')
                 panel.fields['GIT_URL'].SetValue('https://example.org/team/controller')
                 assert not panel.status_choice.IsEnabled()
                 assert panel.dirty
@@ -217,6 +218,7 @@ def main() -> int:
             elif phase == 3:
                 saved = read_setup(project)
                 assert saved.metadata['DESIGNER'] == 'Alice Martin; Zoë Chen'
+                assert saved.metadata['REVIEWER'] == 'Review Engineer'
                 assert saved.status == 'DRAFT'
                 assert saved.workflow is None
                 seen = {}

@@ -41,7 +41,7 @@ automatically generated source ZIP.
 1. Open a saved KiCad 9 project created from the Coprod or KDT KiBot template.
 2. The plugin opens on **Overview**. Select **Project Setup** to edit metadata. Existing values are retained;
    template placeholders receive suggestions from project filenames and Git.
-3. Edit project name, board name, company, authors (one per line), Git web URL,
+3. Edit project name, board name, company, authors (one per line), optional reviewer, Git web URL,
    and logo path. Authors are stored together in the existing `DESIGNER` field.
 4. If the GitHub workflow is missing, the template check shows **Missing required files**.
    Choose **Choose template…**, then **Review adoption…** or **Review upgrade…**.
@@ -65,6 +65,13 @@ Unexpected or ambiguous YAML
 layouts are rejected rather than rewritten. If another program changes either
 file while the form is open, Refresh and review again. The active editor is also
 checked immediately before applying changes.
+
+The optional Reviewer field writes `REVIEWER` in `kibot_main.yaml`. Older projects
+without the key still load and remain unchanged until a reviewer is entered.
+Upgrade their template automation and drawing sheets to display the value.
+Empty reviewer values use `''`; ordinary names entered through Project Setup are
+saved without quotes. Reviewer names are preserved during template upgrades,
+like authors and company.
 
 KiBot propagates metadata into project text variables and generated documents on
 the next CI run. Saving setup here does not commit, push, trigger Actions, or mark
@@ -129,7 +136,7 @@ must be restored or published as a new version before project checks can run.
 There is no separate workflow-presence row or standalone workflow-restore action;
 missing workflows are handled by template review.
 
-Only six metadata values in `kibot_main.yaml`, the workflow's `env.kibot_variant`,
+Only seven metadata values in `kibot_main.yaml`, the workflow's `env.kibot_variant`,
 and numbered changelog title/body entries using the standard extraction commands
 are excluded from shared-content comparisons. All other main configuration
 settings and the shared text-variable commands remain checked. Text line endings
@@ -291,7 +298,7 @@ In a development virtual environment:
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.4.0
+python -m scripts.build_release --tag v0.4.1
 ```
 
 The ZIP uses an explicit file allowlist. Tests verify archive contents, entrypoint
@@ -321,8 +328,8 @@ Use short feature branches and pull requests into `main`. To release:
 3. Tag that commit with `vMAJOR.MINOR.PATCH` and push the tag.
 
 ```sh
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
 The release workflow checks out the exact tag, tests and packages it, publishes a

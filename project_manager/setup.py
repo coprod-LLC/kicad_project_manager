@@ -17,11 +17,17 @@ import uuid
 from .preferences import data_directory
 from .yaml_fields import ScalarBlock, SetupError
 
-METADATA = ('PROJECT_NAME', 'BOARD_NAME', 'COMPANY', 'DESIGNER', 'GIT_URL', 'LOGO')
+METADATA = ('PROJECT_NAME', 'BOARD_NAME', 'COMPANY', 'DESIGNER', 'REVIEWER', 'GIT_URL', 'LOGO')
 STATUSES = ('DRAFT', 'PRELIMINARY', 'CHECKED')
 CONFIG = 'kibot_yaml/kibot_main.yaml'
 WORKFLOW = '.github/workflows/ci.yaml'
 MAX_FILE_SIZE = 2 * 1024 * 1024
+
+
+def metadata_block(data: bytes) -> ScalarBlock:
+    # Older templates have no reviewer. Preserve a no-op until a name is entered.
+    return ScalarBlock(data, 'definitions', tuple(key for key in METADATA if key != 'REVIEWER'),
+                       optional=('REVIEWER',))
 
 
 def project_path(root: Path, relative: str) -> Path:
@@ -70,7 +76,7 @@ def read_setup(root: Path) -> Snapshot:
         raise SetupError(f'Missing {CONFIG}. Start with a Coprod or KDT KiBot template project.')
     if not re.search(rb'^\.\.\.\r?$', config, re.M):
         raise SetupError('KiBot configuration has no separate definitions document.')
-    fields = ScalarBlock(config, 'definitions', METADATA).values
+    fields = metadata_block(config).values
     workflow = read_file(root, WORKFLOW)
     status = workflow_block(workflow).values['kibot_variant'] if workflow is not None else 'DRAFT'
     return Snapshot(root, config, workflow, fields, status)
@@ -164,7 +170,7 @@ class Plan:
 def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
     validate_metadata(metadata, snapshot.metadata)
     changes = []
-    config = ScalarBlock(snapshot.config, 'definitions', METADATA).replace(metadata)
+    config = metadata_block(snapshot.config).replace(metadata, prefer_plain=('REVIEWER',))
     if config != snapshot.config:
         changes.append(Change(CONFIG, snapshot.config, config))
     workflow = snapshot.workflow
