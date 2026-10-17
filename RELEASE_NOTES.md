@@ -1,27 +1,10 @@
-Standards application and project-setup refinements for KiCad 9.
+KiCad Project Manager v0.4.0 adds versioned template checks and reviewed upgrades for KiCad 9.
 
-- Compare and apply a local standards catalog. Custom rules update one marked
-  company-rules block in `.kicad_dru`. Rules outside that block are kept, and
-  later rules still override earlier ones.
-- Merge constraint keys and named net classes without replacing net assignments
-  or unrelated project settings.
-- Update copper, dielectrics, copper finish, and board thickness. Mask, silk,
-  and paste stay unless the preset includes them. A copper layer the board still
-  uses blocks the apply.
-- Record the preset id, source hashes, and Git commit (when the standards folder
-  is a checkout) in `kpm-standards.json`.
-- Close the PCB and schematic editors before applying standards, then reopen the
-  project. A second launch of the plugin warns instead of opening another window.
-- On the Overview, Found is green and Not found is red. Restore a missing
-  `.github/workflows/ci.yaml` from there; the browser starts in KiCad's user
-  template folder.
-- Project status choices include what each status generates. Apply from Project
-  Setup directly, with Preview Changes still optional.
+- Overview opens first and shows the selected template path, project and installed versions, and content status. Details and upgrade review use green for matches, amber for modifications, and red for missing required files.
+- Check the actual fonts, themes, scripts, KiBot YAML, documentation resources, drawing sheets and CI workflow. Version equality alone never proves that files match.
+- Review upgrades file by file, preserving project metadata, workflow status and numbered release-history entries. Project documentation supports three-way merge proposals and explicit conflict decisions.
+- Add missing files, including the GitHub workflow, through template review. Review the final diff before applying, with local backups, external-edit checks and rollback.
+- Keep template identity and project baselines under `kibot_resources/project_manager`; workstation-specific source paths stay in local settings. Older projects remain unversioned until adoption review.
+- The publishing command synchronizes the template description's version badge with its version record and checks for mismatches.
 
-Applying standards writes saved project files after the editors are closed. It
-does not run DRC, commit, push, or approve the electrical design. KiBot still
-updates document text variables on the next CI run.
-
-The supported template fields must be single-line scalars. Because KiBot performs
-literal text substitution, some punctuation (including apostrophes and
-colon-space sequences) requires template changes and is rejected before saving.
+Template checks work offline against the installed source. Remote release discovery remains planned. This release is distributed as a Testing preview through PCM.

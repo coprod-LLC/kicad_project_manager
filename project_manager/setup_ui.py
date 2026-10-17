@@ -6,7 +6,7 @@ from typing import Callable
 import wx
 import wx.lib.scrolledpanel
 
-from .setup import METADATA, STATUSES, WORKFLOW, Plan, Snapshot, apply, prepare, read_file, workflow_block
+from .setup import METADATA, STATUSES, Plan, Snapshot, apply, prepare
 from .yaml_fields import SetupError
 
 
@@ -22,7 +22,7 @@ class PreviewDialog(wx.Dialog):
         diff.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
         layout.Add(diff, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
         buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
-        self.FindWindowById(wx.ID_OK).SetLabel('Apply Changes')
+        self.FindWindow(wx.ID_OK).SetLabel('Apply Changes')
         layout.Add(buttons, 0, wx.EXPAND | wx.ALL, 14)
         self.SetSizer(layout)
         self.SetMinSize((640, 420))
@@ -159,34 +159,12 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
     def _update_status_enabled(self):
         ready = self.snapshot is not None and self.snapshot.workflow is not None
         self.status_choice.Enable(ready)
-        self.status_choice.SetToolTip('' if ready else 'Restore the missing workflow from the Overview tab before changing project status.')
+        self.status_choice.SetToolTip('' if ready else 'Use template review on the Overview tab to add the missing workflow before changing project status.')
 
     def make_plan(self) -> Plan:
         if self.snapshot is None:
             raise SetupError('Refresh the project before preparing changes.')
         return prepare(self.snapshot, self.metadata(), self.selected_status())
-
-    def restore_workflow(self, template: Path) -> Path | None:
-        """Copy a missing workflow from a template, leaving its status and branch policy unchanged."""
-        if self.snapshot is None:
-            raise SetupError('Refresh the project before restoring the workflow.')
-        if self.snapshot.workflow is not None:
-            raise SetupError('The workflow is already present.')
-        if self.before_apply:
-            self.before_apply()
-        template = template.expanduser().resolve(strict=True)
-        data = read_file(template, WORKFLOW)
-        if data is None:
-            raise SetupError(f'The selected template has no {WORKFLOW}.')
-        status = workflow_block(data).values['kibot_variant']
-        plan = prepare(self.snapshot, dict(self.snapshot.metadata), status, template, True)
-        if not plan.changes:
-            raise SetupError('The workflow is already present.')
-        backup = apply(plan, self.storage)
-        written = next(change.after for change in plan.changes if change.relative == WORKFLOW)
-        self.snapshot = Snapshot(self.snapshot.root, self.snapshot.config, written, self.snapshot.metadata, status)
-        self._update_status_enabled()
-        return backup
 
     def apply_plan(self, plan: Plan):
         if self.before_apply:

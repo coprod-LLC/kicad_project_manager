@@ -16,11 +16,10 @@ from .setup import read_setup, suggested_metadata
 from .setup_ui import ProjectSetupPanel
 from .settings_ui import SettingsDialog
 from .standards_ui import StandardsPanel
+from .templates import Comparison, TemplateSourceError, apply_upgrade, compare, load_template, resolve_template
+from .template_ui import (MATCH_COLOUR as FOUND_COLOUR, MODIFIED_COLOUR, MISSING_COLOUR,
+                          TemplateReviewDialog, show_details, show_text_details)
 from .yaml_fields import SetupError
-
-FOUND_COLOUR = wx.Colour(46, 170, 80)
-MISSING_COLOUR = wx.Colour(220, 70, 70)
-
 
 class ProjectManagerFrame(wx.Frame):
     def __init__(self, provider: Callable[[], ProjectContext], storage: Path | None = None):
@@ -30,6 +29,10 @@ class ProjectManagerFrame(wx.Frame):
         self._closing = False
         self._busy = False
         self._context: ProjectContext | None = None
+        self.template_comparison: Comparison | None = None
+        self.template_source: Path | None = None
+        self.template_error_details: str | None = None
+        self._overview_layout_pending = False
         icon_path = Path(__file__).resolve().parent.parent / "resources" / "icon.png"
         if icon_path.is_file():
             self.SetIcon(wx.Icon(str(icon_path), wx.BITMAP_TYPE_PNG))
@@ -48,7 +51,7 @@ class ProjectManagerFrame(wx.Frame):
         layout.Add(header, 0, wx.EXPAND | wx.ALL, 16)
 
         self.notebook = wx.Notebook(panel)
-        overview = wx.Panel(self.notebook)
+        overview = self.overview = wx.Panel(self.notebook)
         overview_layout = wx.BoxSizer(wx.VERTICAL)
         box = wx.StaticBoxSizer(wx.VERTICAL, overview, "Active project")
         grid = wx.FlexGridSizer(cols=2, vgap=12, hgap=16)
@@ -57,41 +60,55 @@ class ProjectManagerFrame(wx.Frame):
         for key, label in [
             ("project_name", "Project"), ("project_file", "Project file"),
             ("board_file", "Board file"), ("kicad_version", "KiCad version"),
-            ("kibot", "KiBot configuration"),
         ]:
             grid.Add(wx.StaticText(box.GetStaticBox(), label=label), 0, wx.ALIGN_CENTER_VERTICAL)
             field = wx.TextCtrl(box.GetStaticBox(), value="—", style=wx.TE_READONLY | wx.BORDER_NONE)
             self.fields[key] = field
             grid.Add(field, 1, wx.EXPAND)
-        grid.Add(wx.StaticText(box.GetStaticBox(), label="GitHub workflow"), 0, wx.ALIGN_CENTER_VERTICAL)
-        workflow_row = wx.BoxSizer(wx.HORIZONTAL)
-        field = wx.TextCtrl(box.GetStaticBox(), value="—", style=wx.TE_READONLY | wx.BORDER_NONE)
-        self.fields["workflow"] = field
-        self._neutral_colour = field.GetForegroundColour()
-        workflow_row.Add(field, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
-        restore_label = "Restore missing .github/workflows/ci.yaml from a template"
-        self.restore_workflow_button = wx.Button(box.GetStaticBox(), label=restore_label)
-        text_width, _text_height = self.restore_workflow_button.GetTextExtent(restore_label)
-        self.restore_workflow_button.SetMinSize((text_width + 48, -1))
-        self.restore_workflow_button.SetToolTip("Copy the workflow from a KiCad project template. An existing workflow is never replaced.")
-        self.restore_workflow_button.Bind(wx.EVT_BUTTON, self._restore_workflow)
-        workflow_row.Add(self.restore_workflow_button, 0, wx.ALIGN_CENTER_VERTICAL)
-        workflow_row.Hide(self.restore_workflow_button)
-        self._workflow_row = workflow_row
-        grid.Add(workflow_row, 1, wx.EXPAND)
+        self.template_label = wx.StaticText(box.GetStaticBox(), label='KiCad template')
+        grid.Add(self.template_label, 0, wx.ALIGN_CENTER_VERTICAL)
+        template_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.template_path = wx.TextCtrl(box.GetStaticBox(), value='No template selected',
+                                        style=wx.TE_READONLY | wx.BORDER_NONE)
+        self.template_path.SetMinSize((1, -1))
+        self._neutral_colour = self.template_path.GetForegroundColour()
+        template_row.Add(self.template_path, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        self.choose_template_button = wx.Button(box.GetStaticBox(), label='Choose template…')
+        self.choose_template_button.Bind(wx.EVT_BUTTON, lambda event: self._choose_template())
+        template_row.Add(self.choose_template_button, 0)
+        grid.Add(template_row, 1, wx.EXPAND)
+        grid.AddSpacer(0)
+        template_box = self._template_box = wx.BoxSizer(wx.VERTICAL)
+        self._template_status_text = 'Choose a template to check project files.'
+        self.template_status = wx.StaticText(box.GetStaticBox(), label=self._template_status_text)
+        self.template_status.SetMinSize((1, -1))
+        template_box.Add(self.template_status, 0, wx.EXPAND)
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        self.template_details_button = wx.Button(box.GetStaticBox(), label='Details…')
+        self.template_details_button.Bind(wx.EVT_BUTTON, self._template_details)
+        self.template_review_button = wx.Button(box.GetStaticBox(), label='Review upgrade…')
+        self.template_review_button.Bind(wx.EVT_BUTTON, self._review_template)
+        for button in (self.template_details_button, self.template_review_button):
+            button.Disable()
+            actions.Add(button, 0, wx.RIGHT, 8)
+        template_box.Add(actions, 0, wx.TOP, 6)
+        grid.Add(template_box, 1, wx.EXPAND)
         box.Add(grid, 1, wx.EXPAND | wx.ALL, 14)
         overview_layout.Add(box, 0, wx.EXPAND | wx.ALL, 16)
 
-        note = wx.StaticText(overview, label="Project Setup edits the project name, board name, company, authors, Git URL, logo, and documentation status. If the GitHub workflow is missing, restore it here from a KiCad template. Standards applies company rules and stackup after the PCB and schematic editors are closed.")
-        note.Wrap(740)
-        overview_layout.Add(note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 16)
+        self._overview_note_text = ('Review template changes and add missing files here. '
+                                    'Project Setup edits metadata and documentation status. '
+                                    'Standards applies company rules and stackup after the PCB and schematic editors are closed.')
+        note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text)
+        note.SetMinSize((1, -1))
+        overview_layout.Add(note, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         overview_layout.Add(wx.StaticText(overview, label="Activity"), 0, wx.LEFT | wx.TOP, 16)
         self.log = wx.TextCtrl(overview, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 110))
         overview_layout.Add(self.log, 1, wx.EXPAND | wx.ALL, 16)
         overview.SetSizer(overview_layout)
-        self.notebook.AddPage(overview, 'Overview')
+        self.notebook.AddPage(overview, 'Overview', select=True)
         self.setup_panel = ProjectSetupPanel(self.notebook, self._on_applied, storage, self._verify_project)
-        self.notebook.AddPage(self.setup_panel, 'Project Setup', select=True)
+        self.notebook.AddPage(self.setup_panel, 'Project Setup')
         self.standards_panel = StandardsPanel(self.notebook, self.open_settings, storage,
                                               self._on_standards_applied, self._verify_standards)
         self.notebook.AddPage(self.standards_panel, 'Standards')
@@ -108,11 +125,44 @@ class ProjectManagerFrame(wx.Frame):
         self.SetSizer(outer)
         self.SetMinSize((860, 640))
         self.Bind(wx.EVT_CLOSE, self._on_close)
+        overview.Bind(wx.EVT_SIZE, self._on_overview_size)
         self.Centre()
         wx.CallAfter(self.refresh)
 
     def _append_log(self, message: str) -> None:
         self.log.AppendText(f"{datetime.now():%H:%M:%S}  {message}\n")
+
+    def _on_overview_size(self, event):
+        self._queue_overview_layout()
+        event.Skip()
+
+    def _queue_overview_layout(self):
+        if not self._overview_layout_pending and not self._closing:
+            self._overview_layout_pending = True
+            wx.CallAfter(self._layout_overview_text)
+
+    def _layout_overview_text(self):
+        self._overview_layout_pending = False
+        if self._closing:
+            return
+        # Wrap to the actual column width, and reserve the full wrapped height.
+        # Always start from the original text so widening also removes old wraps.
+        for control, value, width in (
+                (self.template_status, self._template_status_text, self._template_box.GetSize().width),
+                (self._overview_note, self._overview_note_text, self.overview.GetClientSize().width - 32)):
+            control.SetMinSize((1, -1))
+            control.SetLabel(value)
+            control.Wrap(max(1, width))
+            control.InvalidateBestSize()
+            control.SetMinSize((1, control.GetBestSize().height))
+        self.overview.Layout()
+
+    def _set_template_status(self, value: str, colour):
+        self._template_status_text = value
+        self.template_status.SetLabel(value)
+        self.template_status.SetToolTip(value)
+        self.template_status.SetForegroundColour(colour)
+        self._queue_overview_layout()
 
     def open_settings(self):
         with SettingsDialog(self, self.storage) as dialog:
@@ -129,12 +179,26 @@ class ProjectManagerFrame(wx.Frame):
         self.status.SetLabel("Reading the active project…")
         self.setup_panel.clear('Reading project setup…')
         self.standards_panel.set_context(None)
+        self.template_comparison = None
+        self.choose_template_button.Disable()
+        self.template_details_button.Disable()
+        self.template_review_button.Disable()
+        template_directory = kicad_user_template_directory()
         self.standards_panel.reload_catalog()
 
         def worker() -> None:
             context, error, setup_result = None, None, None
+            template_result = (None, None, None)
             try:
                 context = self._provider()
+                if context.project_saved:
+                    source = None
+                    try:
+                        root = Path(context.project_file).parent
+                        source = resolve_template(root, self.storage, template_directory)
+                        template_result = (source, compare(root, load_template(source)) if source else None, None)
+                    except (ValueError, OSError) as exc:
+                        template_result = (source, None, exc)
                 if context.project_saved and context.board_saved:
                     try:
                         snapshot = read_setup(Path(context.project_file).parent)
@@ -148,24 +212,28 @@ class ProjectManagerFrame(wx.Frame):
                 error = str(exc)
             except Exception:
                 error = "Could not inspect the project. Close and reopen the plugin to retry."
-            wx.CallAfter(self._finish_refresh, context, error, setup_result)
+            wx.CallAfter(self._finish_refresh, context, error, setup_result, template_result)
 
         threading.Thread(target=worker, daemon=True, name="project-context").start()
 
-    def _finish_refresh(self, context: ProjectContext | None, error: str | None, setup_result=None) -> None:
+    def _finish_refresh(self, context: ProjectContext | None, error: str | None, setup_result=None,
+                        template_result=(None, None, None)) -> None:
         if self._closing:
             return
         self._busy = False
         self.refresh_button.Enable()
         self._context = context
+        self.template_comparison = None
+        self.template_source = None
+        self.template_error_details = None
         self.standards_panel.set_context(context if not error else None)
         if error or context is None:
             for field in self.fields.values():
                 field.ChangeValue("—")
                 field.SetForegroundColour(self._neutral_colour)
                 field.SetToolTip("")
-            self._workflow_row.Hide(self.restore_workflow_button)
-            self._workflow_row.Layout()
+            self.template_path.ChangeValue('—')
+            self._set_template_status('Project unavailable', self._neutral_colour)
             self.status.SetLabel("Project unavailable — see activity below")
             self.setup_panel.clear(error or 'Project unavailable. Click Refresh to reconnect.')
             self._append_log(error or "No project was returned.")
@@ -174,10 +242,25 @@ class ProjectManagerFrame(wx.Frame):
             value = getattr(context, key) or "No project file (standalone board)"
             self.fields[key].ChangeValue(value)
             self.fields[key].SetToolTip(value)
-        self._show_presence("kibot", context.kibot_config_present)
-        self._show_presence("workflow", context.workflow_present)
-        self._workflow_row.Show(self.restore_workflow_button, not context.workflow_present)
-        self._workflow_row.Layout()
+        source, comparison, template_error = template_result
+        self.template_source, self.template_comparison = source, comparison
+        self.choose_template_button.Enable(context.project_saved)
+        self.choose_template_button.SetLabel('Change…' if source else 'Choose template…')
+        self.template_path.ChangeValue(str(source) if source else 'No template selected')
+        self.template_path.SetToolTip(str(source) if source else '')
+        self.template_details_button.Enable(comparison is not None or template_error is not None)
+        self.template_review_button.Enable(comparison is not None)
+        if comparison:
+            self._set_template_status(comparison.summary, {'green': FOUND_COLOUR, 'red': MISSING_COLOUR,
+                                      'amber': MODIFIED_COLOUR, 'neutral': self._neutral_colour}[comparison.colour])
+            self.template_review_button.SetLabel('Review adoption…' if not comparison.version else 'Review upgrade…')
+        else:
+            message = (template_error.summary if isinstance(template_error, TemplateSourceError)
+                       else 'Could not check the template. See Details… for the reason.' if template_error
+                       else 'Choose a template to check project files.')
+            if template_error:
+                self.template_error_details = f'Template: {source or "not selected"}\n\n{template_error}'
+            self._set_template_status(message, MISSING_COLOUR if template_error else self._neutral_colour)
         self.Layout()
         self.status.SetLabel(f"Connected — {context.project_name}")
         self._append_log("Project information refreshed.")
@@ -193,38 +276,52 @@ class ProjectManagerFrame(wx.Frame):
         if context.project_file and not context.project_saved:
             self._append_log("The reported project file does not exist on disk yet.")
 
-    def _show_presence(self, key: str, present: bool) -> None:
-        field = self.fields[key]
-        field.ChangeValue("Found" if present else "Not found")
-        field.SetForegroundColour(FOUND_COLOUR if present else MISSING_COLOUR)
-        field.SetToolTip(field.GetValue())
-
-    def _restore_workflow(self, event):
-        snapshot = self.setup_panel.snapshot
-        if snapshot is None or snapshot.workflow is not None:
-            return
+    def _choose_template(self):
+        if self._busy or not self._context or not self._context.project_saved:
+            return None
+        if not self._can_discard():
+            return None
         start = kicad_user_template_directory()
         while not start.exists() and start != start.parent:
             start = start.parent
-        dialog = wx.DirDialog(self, "Choose the KiCad template that contains .github/workflows/ci.yaml",
+        dialog = wx.DirDialog(self, "Choose the versioned KiCad template folder",
                               str(start) if start.exists() else "",
                               style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
         if dialog.ShowModal() != wx.ID_OK:
             dialog.Destroy()
-            return
+            return None
         selected = dialog.GetPath()
         dialog.Destroy()
         try:
-            save_template(selected, self.storage)
-            backup = self.setup_panel.restore_workflow(Path(selected))
+            template = load_template(Path(selected))
+            compare(Path(self._context.project_file).parent, template)
+            save_template(str(template.root), self.storage, template.identity)
         except (SetupError, OSError) as exc:
-            wx.MessageBox(str(exc), "GitHub workflow", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(str(exc), 'KiCad template', wx.OK | wx.ICON_ERROR, self)
+            return None
+        self.template_source = template.root
+        self.refresh(discard=True)
+        return template
+
+    def _template_details(self, event):
+        if self.template_comparison:
+            show_details(self, self.template_comparison)
+        elif self.template_error_details:
+            show_text_details(self, self.template_error_details)
+
+    def _review_template(self, event):
+        if self._busy or not self.template_comparison or not self._can_discard():
             return
-        self._show_presence("workflow", True)
-        self._workflow_row.Hide(self.restore_workflow_button)
-        self._workflow_row.Layout()
-        self.Layout()
-        self._append_log(f"Workflow restored. Backup: {backup}" if backup else "The workflow was already present.")
+        try:
+            comparison = compare(self.template_comparison.root, load_template(self.template_source))
+            with TemplateReviewDialog(self, comparison) as dialog:
+                if dialog.ShowModal() != wx.ID_OK:
+                    return
+                backup = apply_upgrade(dialog.plan, self.storage, self._verify_project)
+            self._append_log(f'Template review applied. Backup: {backup}' if backup else 'Template files already match.')
+            self.refresh(discard=True)
+        except (SetupError, OSError) as exc:
+            wx.MessageBox(str(exc), 'Template upgrade', wx.OK | wx.ICON_ERROR, self)
 
     def _on_applied(self, backup: Path | None):
         self._append_log(f'Project setup saved. Backup: {backup}' if backup else 'No changes were needed.')

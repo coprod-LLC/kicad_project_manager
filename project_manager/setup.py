@@ -161,23 +161,13 @@ class Plan:
         )) for c in self.changes)
 
 
-def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str,
-            template: Path | None = None, restore_workflow: bool = False) -> Plan:
+def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
     validate_metadata(metadata, snapshot.metadata)
     changes = []
     config = ScalarBlock(snapshot.config, 'definitions', METADATA).replace(metadata)
     if config != snapshot.config:
         changes.append(Change(CONFIG, snapshot.config, config))
     workflow = snapshot.workflow
-    if workflow is None and restore_workflow:
-        if template is None:
-            raise SetupError('Select the local template folder to restore the workflow.')
-        template = template.expanduser().resolve(strict=True)
-        # Check that the selection is a complete compatible template, not just any workflow.
-        read_setup(template)
-        workflow = read_file(template, WORKFLOW)
-        if workflow is None:
-            raise SetupError('The selected template has no .github/workflows/ci.yaml.')
     if workflow is not None:
         block = workflow_block(workflow)
         if status not in STATUSES and status != block.values['kibot_variant']:

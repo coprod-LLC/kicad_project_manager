@@ -97,27 +97,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(setup.prepare(after, after.metadata, after.status).changes, ())
         self.assertIsNone(setup.apply(setup.prepare(after, after.metadata, after.status), self.store))
 
-    def test_restore_missing_workflow_preserves_selected_template_branch_policy(self):
-        (self.root / setup.WORKFLOW).unlink()
-        template = sample_project(self.base / 'template')
-        original = (template / setup.WORKFLOW).read_bytes().replace(b'[dev]', b'[main, dev]')
-        (template / setup.WORKFLOW).write_bytes(original)
-        snapshot = setup.read_setup(self.root)
-        plan = setup.prepare(snapshot, snapshot.metadata, 'CHECKED', template, True)
-        self.assertIsNone(plan.changes[0].before)
-        self.assertIn('/dev/null', plan.diff())
-        backup = setup.apply(plan, self.store)
-        self.assertIn(b'[main, dev]', (self.root / setup.WORKFLOW).read_bytes())
-        self.assertEqual((template / setup.WORKFLOW).read_bytes(), original)
-        self.assertFalse(json.loads((backup / 'manifest.json').read_text())['files'][0]['existed'])
-
-    def test_existing_workflow_is_never_replaced_by_template(self):
-        template = sample_project(self.base / 'template')
-        (template / setup.WORKFLOW).write_bytes(b'not a supported workflow')
-        snapshot = setup.read_setup(self.root)
-        self.assertEqual(setup.prepare(snapshot, snapshot.metadata, snapshot.status, template, True).changes, ())
-
-    def test_metadata_only_when_missing_workflow_restoration_not_selected(self):
+    def test_metadata_setup_does_not_create_a_missing_workflow(self):
         (self.root / setup.WORKFLOW).unlink()
         snapshot = setup.read_setup(self.root)
         plan = setup.prepare(snapshot, self.values(snapshot), 'DRAFT')
@@ -141,8 +121,7 @@ class SetupTests(unittest.TestCase):
     def test_workflow_created_after_preview_is_not_overwritten(self):
         (self.root / setup.WORKFLOW).unlink()
         snapshot = setup.read_setup(self.root)
-        template = sample_project(self.base / 'template')
-        plan = setup.prepare(snapshot, self.values(snapshot), 'CHECKED', template, True)
+        plan = setup.prepare(snapshot, self.values(snapshot), 'DRAFT')
         (self.root / setup.WORKFLOW).write_bytes(b'new work')
         with self.assertRaises(SetupError):
             setup.apply(plan, self.store)
