@@ -320,11 +320,13 @@ def load_template(root: Path) -> Template:
 def resolve_template(root: Path, storage: Path | None, user_directory: Path) -> Path | None:
     """Remember machine-local paths by portable identity; discover only unambiguous matches."""
     from .preferences import load_template as saved_template
+    root = root.expanduser().resolve(strict=True)
+    user_directory = user_directory.expanduser().resolve()
     record = read_file(root, STATE, MAX_SIZE) or read_file(root, MANIFEST, MAX_SIZE)
     identity = decode_json(record, 'Project template record')['template_id'] if record else None
     selected = saved_template(storage, identity)
     if selected:
-        return Path(selected).expanduser()
+        return Path(selected).expanduser().resolve()
     if not identity or not user_directory.is_dir():
         return None
     candidates = []

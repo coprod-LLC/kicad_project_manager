@@ -347,6 +347,14 @@ class TemplateTests(unittest.TestCase):
             self.inspect()
 
     @unittest.skipIf(__import__('sys').platform == 'win32', 'symlink permission differs on Windows')
+    def test_source_discovery_and_saved_paths_resolve_directory_aliases(self):
+        alias = self.base / 'workstation-alias'
+        alias.symlink_to(self.base, target_is_directory=True)
+        self.assertEqual(resolve_template(alias / 'project', self.storage, alias), self.template.root)
+        save_template(str(alias / 'template'), self.storage, self.template.identity)
+        self.assertEqual(resolve_template(self.project, self.storage, self.base), self.template.root)
+
+    @unittest.skipIf(__import__('sys').platform == 'win32', 'symlink permission differs on Windows')
     def test_symlink_inside_managed_folder_rejected(self):
         target = self.project / 'kibot_resources/fonts/font.ttf'
         target.unlink()
