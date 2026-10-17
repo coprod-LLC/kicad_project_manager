@@ -20,6 +20,7 @@ PAYLOAD = (
     "project_manager/standards_ui.py", "project_manager/standards_apply.py",
     "project_manager/sexpr.py", "project_manager/json_text.py",
     "project_manager/instance.py",
+    "project_manager/templates.py", "project_manager/template_ui.py",
     "resources/icon.png",
 )
 

@@ -20,9 +20,13 @@ from project_manager.context import ContextError, ProjectContext
 from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame
 from project_manager.setup import read_setup
 from project_manager.setup_ui import PreviewDialog
+from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
+                                        TemplateReviewDialog, item_colour)
+from project_manager.templates import STATE, compare, load_template
 from project_manager.preferences import load_standards
 from project_manager.settings_ui import SettingsDialog
 from tests.fixtures import sample_project
+from tests.test_templates import template_folder
 from tests.standards_fixtures import catalog_folder, saved_board
 
 
@@ -33,20 +37,20 @@ def main() -> int:
     temporary = TemporaryDirectory()
     base = Path(temporary.name)
     project = sample_project(base / 'project', workflow=False)
-    template = sample_project(base / 'template')
+    template = template_folder(base / 'template').root
     sample = ProjectContext(
         kicad_version="9.0.9", project_name="sample",
         project_directory=str(project),
         project_file=str(project / 'sample.kicad_pro'),
         board_file=str(project / 'sample.kicad_pcb'),
-        project_saved=True, board_saved=True, kibot_config_present=True, workflow_present=False,
+        project_saved=True, board_saved=True, kibot_config_present=True,
     )
     standards = catalog_folder(base / 'standards')
     std_project, std_board = saved_board(base / 'standards_project')
     standards_context = ProjectContext(
         kicad_version="9.0.9", project_name="sample", project_directory=str(std_project.parent),
         project_file=str(std_project), board_file=str(std_board),
-        project_saved=True, board_saved=True, kibot_config_present=False, workflow_present=False,
+        project_saved=True, board_saved=True, kibot_config_present=False,
     )
     before = {}
     calls = []
@@ -63,21 +67,110 @@ def main() -> int:
     started = time.monotonic()
     failures = []
     phase = 0
+    source_script = template / 'kibot_resources/scripts/helper.py'
+    source_script_before = source_script.read_bytes()
+    small_status_height = 0
+
+    def capture(window, path):
+        window.Update()
+        size = window.GetClientSize()
+        bitmap = wx.Bitmap(size.width, size.height)
+        memory = wx.MemoryDC(bitmap)
+        memory.Blit(0, 0, size.width, size.height, wx.ClientDC(window), 0, 0)
+        memory.SelectObject(wx.NullBitmap)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        assert bitmap.SaveFile(str(path), wx.BITMAP_TYPE_PNG)
+
+    def check_result_colours():
+        coloured_project = sample_project(base / 'colour-project')
+        config = coloured_project / 'kibot_yaml/kibot_main.yaml'
+        config.write_bytes(config.read_bytes().replace(b'UNRELATED:', b'PROJECT_OVERRIDE:'))
+        comparison = compare(coloured_project, load_template(template))
+        expected = {item.path: (MISSING_COLOUR if item.current is None else
+                               MATCH_COLOUR if item.status == 'Matches' else MODIFIED_COLOUR)
+                    for item in comparison.items}
+        assert set(colour.Get() for colour in expected.values()) == {
+            MATCH_COLOUR.Get(), MODIFIED_COLOUR.Get(), MISSING_COLOUR.Get()}
+        with TemplateDetailsDialog(frame, comparison) as dialog:
+            def inspect_details():
+                try:
+                    contents = dialog.results.GetValue()
+                    for item in comparison.items:
+                        offset = contents.index(f'{item.status}: {item.path}')
+                        style = wx.TextAttr()
+                        assert dialog.results.GetStyle(offset, style), item.path
+                        assert style.GetTextColour() == expected[item.path], item.path
+                    capture(dialog, args.output.with_name('template-details-colours.png'))
+                except Exception as exc:
+                    failures.append(f'Details colors: {exc}')
+                finally:
+                    dialog.EndModal(wx.ID_OK)
+            wx.CallLater(200, inspect_details)
+            dialog.ShowModal()
+        assert not failures
+        with TemplateReviewDialog(frame, comparison) as dialog:
+            for index, item in enumerate(comparison.items):
+                assert item_colour(item) == expected[item.path]
+                assert dialog.files.GetItemTextColour(index) == expected[item.path]
+
+    def review_template():
+        # Cancel first; then add missing files through the only template review path.
+        def cancel_review():
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog)]
+            assert len(dialogs) == 1
+            dialogs[0].EndModal(wx.ID_CANCEL)
+        wx.CallLater(150, cancel_review)
+        frame._review_template(None)
+        assert not (project / STATE).exists()
+        assert read_setup(project).workflow is None
+
+        def accept_apply():
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog)]
+            assert len(dialogs) == 1
+            dialogs[0].EndModal(wx.ID_OK)
+
+        def accept_review():
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog)]
+            assert len(dialogs) == 1
+            dialog = dialogs[0]
+            index = next(i for i, item in enumerate(dialog.comparison.items)
+                         if item.path.endswith('/assembly_notes.txt'))
+            dialog.files.Select(index)
+            dialog._load(index)
+            dialog.editor.SetValue('Project-specific assembly notes\n')
+            assert dialog.choices[dialog.comparison.items[index].path] == 'edit'
+            capture(dialog, args.output.with_name('template-review.png'))
+            wx.CallLater(150, accept_apply)
+            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, wx.ID_OK)
+            dialog.GetEventHandler().ProcessEvent(event)
+
+        wx.CallLater(150, accept_review)
+        frame._review_template(None)
+
+    def assert_template_layout():
+        label = frame.template_label.GetScreenRect()
+        path = frame.template_path.GetScreenRect()
+        assert abs((label.y + label.height / 2) - (path.y + path.height / 2)) <= 2
+        status = frame.template_status.GetScreenRect()
+        buttons = frame.template_details_button.GetScreenRect()
+        assert status.y + status.height <= buttons.y, 'Template status overlaps buttons'
+        for line in frame.template_status.GetLabel().splitlines():
+            assert frame.template_status.GetTextExtent(line).width <= status.width, 'Template status clips horizontally'
 
     def check():
-        nonlocal phase, before
+        nonlocal phase, before, small_status_height
         try:
             if time.monotonic() - started > 30:
                 raise AssertionError("GUI refresh timed out")
-            if frame._busy or not calls:
+            if frame._busy or frame._overview_layout_pending or not calls:
                 wx.CallLater(100, check)
                 return
             if phase == 0:
                 assert frame.fields["project_name"].GetValue() == "sample"
-                assert frame.fields["workflow"].GetValue() == "Not found"
-                assert frame.fields["kibot"].GetForegroundColour() == FOUND_COLOUR
-                assert frame.fields["workflow"].GetForegroundColour() == MISSING_COLOUR
-                assert frame.restore_workflow_button.IsShown()
+                assert frame.notebook.GetSelection() == 0
+                assert 'workflow' not in frame.fields
+                assert frame.template_path.GetValue() == 'No template selected'
+                assert not hasattr(frame, 'restore_workflow_button')
                 assert frame.setup_panel.snapshot is not None
                 assert not frame.setup_panel.status_choice.IsEnabled()
                 phase = 1
@@ -133,14 +226,26 @@ def main() -> int:
 
                 with patch('project_manager.ui.kicad_user_template_directory', return_value=template.parent), \
                      patch('project_manager.ui.wx.DirDialog', FakeDirDialog):
-                    frame._restore_workflow(None)
+                    frame._choose_template()
                 assert seen['path'] == str(template.parent)
-                assert 'ci.yaml' in seen['message']
+                assert 'versioned KiCad template' in seen['message']
+                phase = 30
+            elif phase == 30:
+                assert frame.template_comparison.colour == 'red'
+                assert read_setup(project).workflow is None
+                check_result_colours()
+                review_template()
+                phase = 31
+            elif phase == 31:
                 saved = read_setup(project)
                 assert b'kibot_variant: DRAFT  # existing comment' in saved.workflow
-                assert frame.fields['workflow'].GetValue() == 'Found'
-                assert frame.fields['workflow'].GetForegroundColour() == FOUND_COLOUR
-                assert not frame.restore_workflow_button.IsShown()
+                assert (project / STATE).is_file()
+                assert frame.template_comparison.colour == 'green'
+                assert 'Matches installed template' in frame.template_status.GetLabel()
+                assert frame.template_status.GetForegroundColour() == FOUND_COLOUR
+                assert (project / 'kibot_resources/fonts/font.ttf').is_file()
+                assert (project / 'kibot_resources/templates/assembly_notes.txt').read_text() == 'Project-specific assembly notes\n'
+                assert len(list((base / 'settings').rglob('manifest.json'))) == 2
                 panel = frame.setup_panel
                 assert panel.status_choice.IsEnabled()
                 assert 'schematic PDF' in panel.status_choice.GetString(0)
@@ -198,7 +303,7 @@ def main() -> int:
                 before = {p: p.read_bytes() for p in (std_project, std_board, std_board.with_suffix('.kicad_dru'))}
                 panel._compare(None)
                 phase = 7
-            else:
+            elif phase in (7, 8):
                 panel = frame.standards_panel
                 if panel._busy:
                     wx.CallLater(100, check)
@@ -230,19 +335,42 @@ def main() -> int:
                     assert std_board.read_bytes() == before[std_board]
                     assert (std_project.parent / 'kpm-standards.json').is_file()
                     phase = 9
+                    frame.notebook.SetSelection(0)
+                    frame.SetSize((860, 640))
+                    source_script.write_bytes(source_script_before + b'# edited installed template\n')
+                    frame.refresh(discard=True)
                     frame.Raise()
-                    wx.CallLater(600, check)
-                    return
-                # Capture only this test window's client area, never the user's desktop.
-                frame.Update()
-                size = frame.GetClientSize()
-                bitmap = wx.Bitmap(size.width, size.height)
-                memory = wx.MemoryDC(bitmap)
-                memory.Blit(0, 0, size.width, size.height, wx.ClientDC(frame), 0, 0)
-                memory.SelectObject(wx.NullBitmap)
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                if not bitmap.SaveFile(str(args.output), wx.BITMAP_TYPE_PNG):
-                    raise AssertionError("Could not write GUI preview")
+            elif phase == 9:
+                assert frame.template_comparison is None
+                assert 'Installed template modified' in frame._template_status_text
+                assert 'manifest' not in frame.template_status.GetLabel().lower()
+                assert frame.template_status.GetForegroundColour() == MISSING_COLOUR
+                assert frame.template_details_button.IsEnabled()
+                assert not frame.template_review_button.IsEnabled()
+                with patch('project_manager.ui.show_text_details') as details:
+                    frame._template_details(None)
+                assert 'kibot_resources/scripts/helper.py' in details.call_args.args[1]
+                assert_template_layout()
+                small_status_height = frame.template_status.GetSize().height
+                capture(frame, args.output.with_name('template-modified-small.png'))
+                phase = 10
+                frame.SetSize((1200, 840))
+            elif phase == 10:
+                assert_template_layout()
+                assert frame.template_status.GetSize().height <= small_status_height
+                phase = 11
+                frame.SetSize((860, 640))
+            elif phase == 11:
+                assert_template_layout()
+                assert frame.template_status.GetSize().height == small_status_height
+                source_script.write_bytes(source_script_before)
+                frame.SetSize((980, 840))
+                frame.refresh(discard=True)
+                phase = 12
+            else:
+                assert frame.template_comparison.colour == 'green'
+                assert_template_layout()
+                capture(frame, args.output)
                 frame.Close()
                 return
             wx.CallLater(150, check)
@@ -255,7 +383,8 @@ def main() -> int:
     temporary.cleanup()
     if failures:
         raise SystemExit("GUI smoke failed: " + "; ".join(failures))
-    print("GUI connected, recovered, cancelled preview, applied with preview, applied directly without dialogs, verified backups, saved standards settings, compared and applied presets, and closed")
+    print("GUI opens on Overview, adds the workflow through template review, preserves setup and standards, "
+          "and shows readable template errors with Details at narrow and wide window sizes")
     return 0
 
 

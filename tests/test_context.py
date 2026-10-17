@@ -23,7 +23,6 @@ class ContextTests(unittest.TestCase):
             self.assertEqual(context.board_file, str(root / "sample.v1.kicad_pcb"))
             self.assertTrue(context.project_saved and context.board_saved)
             self.assertTrue(context.kibot_config_present)
-            self.assertFalse(context.workflow_present)
 
     def test_unsaved_board_never_uses_current_directory(self):
         with self.assertRaises(ContextError):

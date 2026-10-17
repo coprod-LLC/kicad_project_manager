@@ -66,13 +66,21 @@ def save_settings(values: dict, directory: Path | None = None) -> None:
             os.unlink(temp)
 
 
-def load_template(directory: Path | None = None) -> str:
-    value = load_settings(directory).get('template_directory', '')
+def load_template(directory: Path | None = None, identity: str | None = None) -> str:
+    settings = load_settings(directory)
+    sources = settings.get('template_directories', {})
+    value = (sources.get(identity, '') if identity and isinstance(sources, dict)
+             else settings.get('template_directory', ''))
     return value if isinstance(value, str) else ''
 
 
-def save_template(value: str, directory: Path | None = None) -> None:
-    save_settings({'template_directory': value}, directory)
+def save_template(value: str, directory: Path | None = None, identity: str | None = None) -> None:
+    settings = load_settings(directory, strict=True)
+    sources = settings.get('template_directories', {})
+    sources = dict(sources) if isinstance(sources, dict) else {}
+    if identity:
+        sources[identity] = value
+    save_settings({'template_directory': value, 'template_directories': sources}, directory)
 
 
 def load_standards(directory: Path | None = None) -> str:

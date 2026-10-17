@@ -91,7 +91,18 @@ no further diff, and a DRC spot-check. That check does not approve the board.
 
 ## Later increments
 
-- Extend project setup: broader template migrations and live text-variable sync
+Delivered locally in v0.4.0: versioned local template sources in Overview, real
+managed-file comparisons, per-file upgrade review, metadata/status/release-history
+preservation, document baselines and three-way merge proposals, and guarded
+application with the existing backup/rollback path. Identity and baseline records
+live in `kibot_resources/project_manager`; local source paths stay in user settings.
+Remote release discovery and checkout updates remain a separate later increment.
+Overview is now the opening tab. Workflow creation has moved into template review;
+the separate workflow-presence row and standalone restoration code are removed.
+Installed-source errors have short summaries with file details, and Overview text
+reflows with the actual column width.
+
+- Extend project setup: live text-variable sync
   once the safe KiCad save/reload path has been established.
 - Private standards catalog: compatible rules/stackup choices, pinned source
   commits, drift detection, previews, and restoration.

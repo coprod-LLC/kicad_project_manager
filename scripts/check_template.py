@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from project_manager.setup import CONFIG, WORKFLOW, apply, prepare, read_setup
+from project_manager.setup import CONFIG, apply, prepare, read_setup
 
 EXPECTED = {
     'PROJECT_NAME': 'Example controller', 'BOARD_NAME': 'Control board',
@@ -27,10 +27,9 @@ def main():
         if args.template is None:
             parser.error('--template is required for prepare')
         shutil.copytree(args.template, root, ignore=shutil.ignore_patterns('.git'))
-        (root / WORKFLOW).unlink()
         snapshot = read_setup(root)
         metadata = {**snapshot.metadata, **EXPECTED}
-        apply(prepare(snapshot, metadata, 'PRELIMINARY', args.template, True), root.parent / 'test-settings')
+        apply(prepare(snapshot, metadata, 'PRELIMINARY'), root.parent / 'test-settings')
         saved = read_setup(root)
         assert saved.metadata == metadata and saved.status == 'PRELIMINARY'
         assert not prepare(saved, metadata, 'PRELIMINARY').changes
@@ -49,7 +48,7 @@ def main():
                         ['config', 'user.email', 'integration@example.org'],
                         ['add', '.'], ['commit', '-m', 'Synthetic setup integration project']]:
             subprocess.run(['git', '-C', str(root), *command], check=True, capture_output=True)
-        print('Disposable public template prepared; metadata and workflow restoration verified.')
+        print('Disposable public template prepared; metadata and documentation status verified.')
     else:
         project_file = root / 'KDT_Hierarchical_KiBot.kicad_pro'
         variables = json.loads(project_file.read_text(encoding='utf-8'))['text_variables']

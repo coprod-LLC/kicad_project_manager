@@ -2,7 +2,7 @@
 
 A small, native wxPython IPC companion for KiCad 9 projects and KiBot workflows.
 
-**Current preview: project setup, standards presets, and PCM release distribution.**
+**Current preview: template checks and upgrades, project setup, standards presets, and PCM distribution.**
 The window connects to the launching PCB Editor. Project Setup edits KiBot
 configuration and workflow files. Standards can update saved design rules and
 stackup after the PCB and schematic editors are closed.
@@ -39,15 +39,17 @@ automatically generated source ZIP.
 ## Project setup
 
 1. Open a saved KiCad 9 project created from the Coprod or KDT KiBot template.
-2. Open **KiCad Project Manager → Project Setup**. Existing values are retained;
+2. The plugin opens on **Overview**. Select **Project Setup** to edit metadata. Existing values are retained;
    template placeholders receive suggestions from project filenames and Git.
 3. Edit project name, board name, company, authors (one per line), Git web URL,
    and logo path. Authors are stored together in the existing `DESIGNER` field.
-4. If the GitHub workflow is missing, the Overview shows **Not found** in red.
-   Choose **Restore missing .github/workflows/ci.yaml from a template**. The folder browser
+4. If the GitHub workflow is missing, the template check shows **Missing required files**.
+   Choose **Choose template…**, then **Review adoption…** or **Review upgrade…**.
+   Add `.github/workflows/ci.yaml` through the same review as other missing files. The folder browser
    opens in KiCad's user template directory (or the nearest existing folder).
-   An existing workflow is never replaced. The copied file keeps the template's
-   status and branch policy.
+   The selected folder must contain a valid versioned template manifest. An existing
+   workflow is replaced only when explicitly selected in template review. A newly
+   added workflow keeps the template's status and branch policy.
 5. Select **DRAFT**, **PRELIMINARY**, or **CHECKED**. This changes
    `env.kibot_variant`; **RELEASED** remains controlled by version tags.
    Status stays unavailable until the workflow exists.
@@ -92,6 +94,104 @@ original files back to their project-relative paths, and remove a newly created
 workflow if appropriate. Review later edits before restoring. An interrupted
 multi-file save automatically restores files it wrote when no external edit has
 intervened.
+
+## Template source and upgrades
+
+The Overview shows the selected local template path, the project's recorded
+template version, and the installed template version. **Choose template…** and
+**Change…** select a source without modifying the project. Paths are remembered
+on this computer by template identity; absolute workstation paths are never
+written into the project. A project with a known identity can find its source
+automatically when exactly one matching template is installed in the user template folder.
+
+Templates carry a tracked manifest at
+`kibot_resources/project_manager/template.json`. It is copied into new KiCad
+projects outside the excluded `meta` folder, keeping project roots clear. Older
+projects remain **Project version unknown** until reviewed; selecting a template
+does not establish their history.
+
+The check verifies the required inventory and file contents, including fonts,
+themes, scripts, KiBot YAML, documentation resources, drawing sheets, the launch
+script and `.github/workflows/ci.yaml`. A version number alone never proves a match.
+Missing required files are red; incoming updates or unexpected modifications are
+amber; a verified match is green. Text accompanies every color. **Details…** lists
+the result for each file and additional project files that will be preserved.
+Installed system fonts are outside this check.
+Both Details and the upgrade-review file list use green for matches, amber for
+modified/incoming content, and red for missing required files. Status text remains
+visible alongside the colors.
+
+The Overview is the opening tab. The template label aligns with its source path;
+status text wraps to the available column width when the window is resized.
+If the installed template has been edited, the Overview explains that the source
+must be restored or published as a new version before project checks can run.
+**Details…** stays available and lists the changed files and recovery guidance.
+There is no separate workflow-presence row or standalone workflow-restore action;
+missing workflows are handled by template review.
+
+Only six metadata values in `kibot_main.yaml`, the workflow's `env.kibot_variant`,
+and numbered changelog title/body entries using the standard extraction commands
+are excluded from shared-content comparisons. All other main configuration
+settings and the shared text-variable commands remain checked. Text line endings
+are normalized; editable scalar quoting, comments and blank lines surrounding
+the project entries do not cause false differences. Unrecognized YAML layouts
+are rejected rather than guessed at.
+
+When enabling commented changelog entries, remove the comment marker and its
+following space so the `- variable` lines align with the other list items, with
+`command` indented two spaces further. Adding the standard numbered release
+entries is supported; malformed indentation or changed extraction commands are
+not ignored as valid project customization.
+
+**Review adoption…** / **Review upgrade…** offers per-file decisions. Missing
+files and shared files unchanged since the previous baseline can be updated;
+unexpected modifications require an explicit keep/replace decision. The four
+project documentation sources (`fabrication_notes.txt`, `assembly_notes.txt`,
+`impedance_table.txt`, `readme.txt`) preserve project customization. If both sides
+changed, non-overlapping edits receive a three-way merge proposal. Overlapping
+edits require a decision, with the previous baseline, incoming diff and an editor
+available in the review dialog. Keeping a changed document explicitly acknowledges
+that release's incoming changes; kept shared-file exceptions still show as modified.
+
+The final preview shows the actual writes before **Apply Changes**. Originals use
+the existing local backup/rollback mechanism. Every compared file and the source
+template are checked again before writing. Successful review records the baseline
+at `kibot_resources/project_manager/project.json`, which should be committed with
+the project. Repeating the same apply makes no further changes. Additional files
+are retained, including files no longer required by a newer template; remove an
+obsolete file separately only after reviewing its use. Downgrades are refused.
+Board, schematic, `.kicad_pro` and custom rules are outside template upgrades.
+
+This comparison is against the **installed** source, not a claim about the latest
+remote release. Update that checkout or install a newer template release, then
+Refresh. Template source updates never automatically upgrade projects. No GitHub
+API token or network access is required for these checks.
+
+### Publishing template manifests
+
+From a Project Manager development checkout, generate a manifest for a reviewed
+template release, then verify it. First add a visible version badge to the
+template's `meta/info.html` with these markers (inside the desired formatting):
+
+```html
+<!-- kpm:version:start -->Template v1.0.0<!-- kpm:version:end -->
+```
+
+```sh
+python -m scripts.template_manifest --template /path/to/template --id example.kicad-kibot --version 1.0.0
+python -m scripts.template_manifest --template /path/to/template --check
+```
+
+Commit the manifest with the template. Any change to a managed source file requires
+regenerating it; the plugin rejects a source with missing, extra or modified managed
+files relative to its manifest. Generation updates only the marked HTML badge to
+the manifest version, preserving the rest of the description. `--check` also
+verifies that the visible badge matches; missing, duplicated, reversed or stale
+markers fail validation. The badge is static HTML for KiCad's template selector.
+Increment the template version for each new published
+release, and keep published tags immutable. The manifest format version is separate
+from the template release version. Company data and manifests stay in their own
+repositories; public tests contain synthetic templates only.
 
 ## Standards
 
@@ -191,7 +291,7 @@ In a development virtual environment:
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.3.0
+python -m scripts.build_release --tag v0.4.0
 ```
 
 The ZIP uses an explicit file allowlist. Tests verify archive contents, entrypoint
@@ -221,8 +321,8 @@ Use short feature branches and pull requests into `main`. To release:
 3. Tag that commit with `vMAJOR.MINOR.PATCH` and push the tag.
 
 ```sh
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 The release workflow checks out the exact tag, tests and packages it, publishes a
@@ -242,10 +342,11 @@ Pages deployment can be retried through the workflow's manual tag input.
   recreate the plugin environment, then restart the PCB Editor.
 - **Project unavailable:** close modal dialogs, save/open a board, and click Refresh.
 - **KiCad 10+:** this initial release intentionally supports KiCad 9 only.
-- **Missing KiBot configuration:** start with a compatible Coprod or KDT template
-  project. The plugin repairs a missing workflow, not an entire missing template.
-- **Missing CI workflow:** on the Overview, choose **Restore missing .github/workflows/ci.yaml from a template**
-  and select the template root. The browser starts in KiCad's user template folder:
+- **Missing KiBot configuration:** select a compatible versioned template and use
+  template review to add missing automation files. Design files are outside this repair.
+- **Missing CI workflow:** on the Overview, select a versioned template with
+  **Choose template…**, then add the workflow through **Review adoption…** or
+  **Review upgrade…**. The browser starts in KiCad's user template folder:
   `~/.local/share/kicad/9.0/template` on Linux, `~/Documents/KiCad/9.0/template` on macOS,
   and `%USERPROFILE%\\Documents\\KiCad\\9.0\\template` on Windows. `KICAD_USER_TEMPLATE_DIR`
   overrides that location.

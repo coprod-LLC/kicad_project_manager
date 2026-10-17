@@ -22,7 +22,6 @@ class ProjectContext:
     project_saved: bool
     board_saved: bool
     kibot_config_present: bool
-    workflow_present: bool
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -55,7 +54,6 @@ def context_from_document(document: Any, version: str) -> ProjectContext:
         project_saved=bool(project_file and Path(project_file).is_file()),
         board_saved=board.is_file(),
         kibot_config_present=(setup_directory / "kibot_yaml" / "kibot_main.yaml").is_file(),
-        workflow_present=(setup_directory / ".github" / "workflows" / "ci.yaml").is_file(),
     )
 
 
