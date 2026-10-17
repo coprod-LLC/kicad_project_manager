@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from project_manager.preferences import save_template
-from project_manager.setup import CONFIG, METADATA, WORKFLOW, read_setup
+from project_manager.setup import CONFIG, METADATA, WORKFLOW, read_setup, prepare, apply
 from project_manager.templates import (MANIFEST, STATE, DOCUMENTS, apply_upgrade, build_manifest,
                                        canonical, compare, load_template, policy, prepare_upgrade,
                                        resolve_template, version_tuple)
@@ -121,6 +121,27 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(comparison.colour, 'red')
         self.assertEqual(len(comparison.problems), 2)
         self.assertIn('Missing required files', comparison.summary)
+
+    def test_reviewer_preserved_when_upgrading_a_legacy_template(self):
+        config = self.template.root / CONFIG
+        config.write_bytes(config.read_bytes().replace(b"  REVIEWER: ''\n", b''))
+        self.template = release(self.template.root, '1.0.0')
+        project_config = self.project / CONFIG
+        project_config.write_bytes(config.read_bytes())
+        (self.project / MANIFEST).write_bytes(self.template.manifest)
+        self.adopt()
+        config.write_bytes(config.read_bytes().replace(b'  DESIGNER: Author\n',
+                           b"  DESIGNER: Author\n  REVIEWER: ''\n"))
+        self.template = release(self.template.root, '1.1.0')
+        self.adopt()
+        self.assertEqual(read_setup(self.project).metadata['REVIEWER'], '')
+        snapshot = read_setup(self.project)
+        apply(prepare(snapshot, {**snapshot.metadata, 'REVIEWER': 'Review Engineer'}, snapshot.status), self.storage)
+        self.assertFalse(self.inspect().problems)
+        config.write_bytes(config.read_bytes().replace(b'type: report', b'type: report_updated'))
+        self.template = release(self.template.root, '1.2.0')
+        self.adopt()
+        self.assertEqual(read_setup(self.project).metadata['REVIEWER'], 'Review Engineer')
 
     def test_restored_files_and_repeat_apply(self):
         (self.project / WORKFLOW).unlink()

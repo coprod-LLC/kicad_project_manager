@@ -12,7 +12,8 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 
-from .setup import CONFIG, METADATA, WORKFLOW, Change, commit_changes, read_file, project_path, workflow_block
+from .setup import (CONFIG, METADATA, WORKFLOW, Change, commit_changes, metadata_block,
+                    read_file, project_path, workflow_block)
 from .yaml_fields import ScalarBlock, SetupError
 
 MANIFEST = 'kibot_resources/project_manager/template.json'
@@ -131,10 +132,14 @@ def decode_json(data: bytes, label: str) -> dict:
 
 
 def _mask(data: bytes, block: str, keys: tuple[str, ...]) -> str:
-    parsed = ScalarBlock(data, block, keys)
+    parsed = metadata_block(data) if block == 'definitions' and keys == METADATA else ScalarBlock(data, block, keys)
     value = parsed.text
     for field in sorted(parsed.fields.values(), key=lambda f: f.start, reverse=True):
         value = value[:field.start] + "'KPM_PROJECT_VALUE'" + value[field.end:]
+    if block == 'definitions' and keys == METADATA:
+        # Presence and value are project-owned, including on legacy templates.
+        value = re.sub(r'^ {' + str(parsed.indent) + r'}REVIEWER[ \t]*:[^\r\n]*(?:\r?\n|$)',
+                       '', value, flags=re.M)
     return value
 
 
@@ -203,8 +208,8 @@ def adapted(path: str, incoming: bytes, current: bytes | None) -> bytes:
         return incoming
     kind = policy(path)
     if kind == 'metadata':
-        values = ScalarBlock(current, 'definitions', METADATA).values
-        incoming = ScalarBlock(incoming, 'definitions', METADATA).replace(values)
+        values = metadata_block(current).values
+        incoming = metadata_block(incoming).replace(values, prefer_plain=('REVIEWER',))
     elif kind == 'workflow':
         values = workflow_block(current).values
         incoming = workflow_block(incoming).replace({'kibot_variant': values['kibot_variant']})

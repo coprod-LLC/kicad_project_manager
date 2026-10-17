@@ -16,6 +16,7 @@ definitions:
   BOARD_NAME: Board Name
   COMPANY: Example Company
   DESIGNER: Author
+  REVIEWER: ''
   GIT_URL: 'https://github.com/nguyen-v/KDT_Hierarchical_KiBot'
   LOGO: 'Logos/example.png'
   UNRELATED: '@KEEP_THIS@'

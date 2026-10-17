@@ -104,6 +104,33 @@ class SetupTests(unittest.TestCase):
         setup.apply(plan, self.store)
         self.assertFalse((self.root / setup.WORKFLOW).exists())
 
+    def test_optional_reviewer_roundtrip_clear_and_legacy_insertion(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                config = CONFIG_TEXT.replace("  REVIEWER: ''\n", '') if legacy else CONFIG_TEXT
+                path = self.root / setup.CONFIG
+                path.write_bytes(config.replace('\n', '\r\n').encode())
+                before = setup.read_setup(self.root)
+                self.assertEqual(before.metadata['REVIEWER'], '')
+                self.assertFalse(setup.prepare(before, before.metadata, before.status).changes)
+                values = {**before.metadata, 'REVIEWER': 'Zoë Chen'}
+                setup.apply(setup.prepare(before, values, before.status), self.store)
+                saved = setup.read_setup(self.root)
+                self.assertEqual(saved.metadata, values)
+                self.assertIn(b'\r\n', saved.config)
+                self.assertEqual(saved.config.count(b'REVIEWER:'), 1)
+                self.assertIn('  REVIEWER: Zoë Chen\r\n'.encode(), saved.config)
+                self.assertFalse(setup.prepare(saved, saved.metadata, saved.status).changes)
+                setup.apply(setup.prepare(saved, {**values, 'REVIEWER': ''}, saved.status), self.store)
+                self.assertEqual(setup.read_setup(self.root).metadata['REVIEWER'], '')
+                self.assertIn(b"  REVIEWER: ''\r\n", (self.root / setup.CONFIG).read_bytes())
+
+    def test_invalid_reviewer_is_rejected(self):
+        snapshot = setup.read_setup(self.root)
+        for value in ["O'Brien", 'Reviewer: name', 'Reviewer # comment', '@INJECT@', 'one\ntwo']:
+            with self.subTest(value=value), self.assertRaises(SetupError):
+                setup.prepare(snapshot, {**snapshot.metadata, 'REVIEWER': value}, snapshot.status)
+
     def test_external_change_to_either_file_blocks_all_writes(self):
         for relative in (setup.CONFIG, setup.WORKFLOW):
             with self.subTest(relative=relative):
