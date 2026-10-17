@@ -120,7 +120,7 @@ def main() -> int:
         print('GUI: cancelling template review', flush=True)
         # Cancel first; then add missing files through the only template review path.
         def cancel_review():
-            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog)]
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog) and w.IsModal()]
             assert len(dialogs) == 1
             dialogs[0].EndModal(wx.ID_CANCEL)
         wx.CallLater(150, cancel_review)
@@ -129,12 +129,12 @@ def main() -> int:
         assert read_setup(project).workflow is None
 
         def accept_apply():
-            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog)]
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
             assert len(dialogs) == 1
             dialogs[0].EndModal(wx.ID_OK)
 
         def accept_review():
-            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog)]
+            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog) and w.IsModal()]
             assert len(dialogs) == 1
             dialog = dialogs[0]
             index = next(i for i, item in enumerate(dialog.comparison.items)
@@ -208,7 +208,7 @@ def main() -> int:
                     assert dialog.ShowModal() == wx.ID_CANCEL
                 assert read_setup(project) == before
                 def accept_preview():
-                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog)]
+                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
                     assert len(dialogs) == 1
                     dialogs[0].EndModal(wx.ID_OK)
                 wx.CallLater(150, accept_preview)
@@ -282,7 +282,7 @@ def main() -> int:
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 4
                 # Settings dialog: save the standards folder through the real OK binding.
                 def save_dialog():
-                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, SettingsDialog)]
+                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, SettingsDialog) and w.IsModal()]
                     assert len(dialogs) == 1
                     dialog = dialogs[0]
                     assert dialog.backup_path == base / 'settings' / 'backups'
