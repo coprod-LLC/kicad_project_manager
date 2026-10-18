@@ -275,14 +275,21 @@ class StandardsPanel(wx.ScrolledWindow):
     def _layout_feedback(self):
         if self._closed:
             return
-        self.feedback.SetMinSize((1, -1))
-        self.feedback.SetLabel(self._feedback_text)
         self.feedback.SetToolTip(self._feedback_text)
-        self.feedback.Wrap(max(1, self.GetClientSize().width - 28))
-        self.feedback.SetMinSize((1, self.feedback.GetBestSize().height))
         self.feedback.Show(bool(self._feedback_text))
-        self.Layout()
-        self.FitInside()
+        # Native scrollbar widths differ between GTK themes. Wrap to the actual
+        # allocated text width, including a second pass if scrolling changes it.
+        for _ in range(3):
+            self.feedback.SetMinSize((1, -1))
+            self.Layout()
+            width = max(1, self.feedback.GetClientSize().width)
+            self.feedback.SetLabel(self._feedback_text)
+            self.feedback.Wrap(width)
+            self.feedback.SetMinSize((1, self.feedback.GetBestSize().height))
+            self.Layout()
+            self.FitInside()
+            if self.feedback.GetClientSize().width == width:
+                break
 
     def set_context(self, context: ProjectContext | None):
         self._generation += 1
