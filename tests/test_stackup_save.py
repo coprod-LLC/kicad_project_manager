@@ -69,12 +69,14 @@ class SavePresetTests(unittest.TestCase):
         root = detailed_catalog(self.base / 'other')
         source = next(p for p in load_catalog(root).stackups if p.id == 'example_six_layer')
         native = source.files['stackup_file'].replace('(copper_finish', '(edge_plating yes)\n(copper_finish')
-        self.board.write_text(self.board.read_text().replace(STACKUP, native)
-                              .replace(LAYERS, source.files['copper_layers_file']))
+        board_text = self.board.read_text(encoding='utf-8').replace(STACKUP, native).replace(
+            LAYERS, source.files['copper_layers_file'])
+        self.board.write_bytes(board_text.replace('\n', '\r\n').encode('utf-8'))
         self.capture = capture_saved_stackup(self.board)
         result = save_preset(self.plan())
         saved = result.stackups[0].files['stackup_file']
-        self.assertEqual(saved.strip(), self.capture.physical.native.strip())
+        self.assertEqual(saved.strip(), self.capture.physical.native.replace('\r\n', '\n').strip())
+        self.assertNotIn('\r', saved)
         self.assertIn('(edge_plating yes)', saved)
         self.assertEqual(parse_stackup(saved).layers, parse_stackup(native).layers)
 
@@ -188,7 +190,7 @@ class SavePresetTests(unittest.TestCase):
         target = self.folder / plan.relative
         self.assertTrue(target.resolve().is_relative_to(self.folder.resolve()))
         save_preset(plan)
-        self.assertEqual(json.loads(target.read_text())['manufacturer'], '../Mäker / name')
+        self.assertEqual(json.loads(target.read_text(encoding='utf-8'))['manufacturer'], '../Mäker / name')
         self.assertIsNotNone(self.plan(manufacturer_stackup_id=None))
         with self.assertRaisesRegex(StandardsError, 'destination'):
             save_preset(replace(plan, relative='../outside.json'))
