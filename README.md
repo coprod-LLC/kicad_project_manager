@@ -202,15 +202,35 @@ repositories; public tests contain synthetic templates only.
 
 ## Standards
 
-1. Choose **Settings…** and select a standards folder containing `catalog.json`
-   (a plain folder or an existing Git checkout). It is remembered on this computer.
-   Settings also shows the backup folder, with an **Open Backups** button.
-2. Open the **Standards** tab and choose a Rules preset, a Stackup preset, or both.
-   The details box lists the netclasses, named rule areas, and named nets a rules
-   preset depends on.
-3. Save the project in KiCad, then choose **Compare with Saved Project** or
-   **Preview Changes…**. **Apply** writes the same result without the preview.
-4. Close the PCB editor and the schematic editor before applying, and leave this
+1. On **Overview**, use **Standards repository → Change…** to select a folder
+   containing `catalog.json` (a plain folder or existing Git checkout). Its path,
+   catalog name and profile counts appear beside the template source. It is remembered on this computer.
+   Overview also shows the backup folder, with an **Open Backups** button.
+   **Refresh**, beside the four tabs, refreshes the project and reloads the catalog.
+2. **Design Rules** shows a descriptive profile, current/selected board constraints,
+   and a separate custom-rule list. Missing netclasses, named areas and named nets
+   are reported when comparing. Schematic assignments and netclass patterns stay.
+   **Profile details…** includes the purpose, assumptions and full custom-rule text.
+   Missing dependencies require reviewing the prepared changes even when using Apply.
+3. **Stackup** shows **Current saved board** and **Selected preset — preview** side
+   by side. Selection changes the preview; it does not change the board. Each
+   saved construction is matched against the library's copper and dielectric
+   properties, displaying **manufacturer · full construction code** when identified.
+   Surface or editor-setting differences are marked; ambiguous matches are reported
+   rather than assigning a supplier. Matching uses saved layer data, independently
+   of the last applied preset record. Each dielectric sublayer has its own row.
+   Dimensions are explicit and the drawing is
+   schematic; changed rows have an asterisk and shading. **Details…** exposes all
+   materials, thicknesses, colors, dielectric constants, loss tangents and locks.
+   Manufacturer codes, nominal copper weights, dated recommendation flags, usage
+   history, and optional impedance routing guidance appear in **Preset details…**.
+   A compact, always-visible row lets you override mask color, silkscreen color and finish.
+4. Save the project in KiCad. For **Stackup**, select a preset, inspect the drawings,
+   then choose **Apply** beside the preset selector. Validation and backups run automatically; a short status
+   message reports the result: green for success, amber when open KiCad editors block
+   applying, and red for other failures. **Design Rules** also offers **Compare with Saved
+   Project** and **Review Changes…** for its constraints and custom rules.
+5. Close the PCB editor and the schematic editor before applying, and leave this
    window open. Reopen the project afterward. An editor that is still open will
    overwrite the apply the next time it saves. Opening the plugin again while its
    window is already open shows a warning instead of a second window.
@@ -228,14 +248,28 @@ block overrides the company rule. The first apply inserts the block just after
 `(version 1)`, which puts existing project rules after it. A later apply updates
 the block where it already stands.
 
-Constraints update matching keys in `board.design_settings.rules`. Preset net
-classes are updated by name; other classes and net assignments stay. Stackup
-updates copper, dielectrics, copper finish, and board thickness. Mask, silk, and
-paste layers stay unless the preset includes them. A copper layer the board still
-uses is not removed.
+An existing prefix with the same shared rule names and order can be adopted into
+that block through Review Changes. Changed rules are listed and their exact diff
+must be reviewed; later project exceptions stay outside the block. Interleaved
+local rules are refused. Broken markers from an earlier apply must still be
+restored explicitly. The non-UI planning API requires explicit opt-in before
+proposing adoption of differing rule values.
+
+Constraints update matching keys in `board.design_settings.rules`. Legacy presets
+can also supply netclass definitions, merged by name; assignments, patterns and
+other classes stay. Stackup updates copper, dielectric plies, impedance control,
+finish and any included silk/paste/mask layers. Omitted physical entries are
+retained, and the applied board thickness is calculated from the resulting full
+stackup, including retained masks. Existing copper layer roles and display names
+stay. A copper layer the board still uses is not removed.
+
+Stackups are maintained in the standards repository. Manufacturer recommendation,
+internal preference and prior use are independent metadata;
+nominal order thickness and manufacturer finished thickness are distinct from
+KiCad's calculated physical total. Routing guidance does not assign nets or set widths.
 
 Each apply records the preset id, source file hashes, and the standards checkout
-commit when that folder is a Git repository, in `kpm-standards.json` next to the
+commit when that folder is a Git repository, plus explicit appearance overrides, in `kpm-standards.json` next to the
 project. That file is the provenance for a later drift check. Originals are
 backed up with the same restore path as project setup. A second apply of the
 same presets makes no further file changes. Company presets are not part of this
@@ -298,7 +332,7 @@ In a development virtual environment:
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.4.1
+python -m scripts.build_release --tag v0.5.0
 ```
 
 The ZIP uses an explicit file allowlist. Tests verify archive contents, entrypoint
@@ -328,8 +362,8 @@ Use short feature branches and pull requests into `main`. To release:
 3. Tag that commit with `vMAJOR.MINOR.PATCH` and push the tag.
 
 ```sh
-git tag v0.4.1
-git push origin v0.4.1
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 The release workflow checks out the exact tag, tests and packages it, publishes a

@@ -25,10 +25,10 @@ from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, Template
                                         TemplateReviewDialog, item_colour)
 from project_manager.templates import STATE, compare, load_template
 from project_manager.preferences import load_standards
-from project_manager.settings_ui import SettingsDialog
+from project_manager.settings_ui import StandardsFolderDialog
 from tests.fixtures import sample_project
 from tests.test_templates import template_folder
-from tests.standards_fixtures import catalog_folder, saved_board
+from tests.standards_fixtures import RULES, detailed_catalog, saved_board
 
 
 def main() -> int:
@@ -46,8 +46,11 @@ def main() -> int:
         board_file=str(project / 'sample.kicad_pcb'),
         project_saved=True, board_saved=True, kibot_config_present=True,
     )
-    standards = catalog_folder(base / 'standards')
+    standards = detailed_catalog(base / 'standards')
     std_project, std_board = saved_board(base / 'standards_project')
+    std_board.with_suffix('.kicad_dru').write_text(
+        RULES.replace('0.2mm', '0.15mm') + '# existing exception stays untouched\n'
+        '(rule "Local exception" (constraint courtyard_clearance (min -1mm)))\n')
     standards_context = ProjectContext(
         kicad_version="9.0.9", project_name="sample", project_directory=str(std_project.parent),
         project_file=str(std_project), board_file=str(std_board),
@@ -162,6 +165,13 @@ def main() -> int:
         for line in frame.template_status.GetLabel().splitlines():
             assert frame.template_status.GetTextExtent(line).width <= status.width, 'Template status clips horizontally'
 
+    def assert_header_layout():
+        refresh = frame.refresh_button.GetScreenRect()
+        page = frame.notebook.GetCurrentPage().GetScreenRect()
+        assert refresh.bottom <= page.top, f'Refresh overlaps the page content: {refresh}, page {page}'
+        assert refresh.right <= frame.notebook.GetScreenRect().right
+        assert refresh.left > frame.notebook.GetScreenRect().left + 450, 'Refresh crowds the tabs'
+
     def check():
         nonlocal phase, before, small_status_height, logged_phase
         try:
@@ -176,13 +186,20 @@ def main() -> int:
             if phase == 0:
                 assert frame.fields["project_name"].GetValue() == "sample"
                 assert frame.notebook.GetSelection() == 0
+                assert not hasattr(frame, 'status')
+                assert not hasattr(frame, 'settings_button')
+                assert not hasattr(frame.stackup_panel, 'reload_button')
+                assert_header_layout()
+                assert frame.backups_path.GetValue() == str(base / 'settings' / 'backups')
+                assert not frame.backups_button.IsEnabled()
                 assert 'workflow' not in frame.fields
                 assert frame.template_path.GetValue() == 'No template selected'
                 assert not hasattr(frame, 'restore_workflow_button')
                 assert frame.setup_panel.snapshot is not None
                 assert not frame.setup_panel.status_choice.IsEnabled()
                 phase = 1
-                frame.refresh()
+                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, frame.refresh_button.GetId())
+                frame.refresh_button.GetEventHandler().ProcessEvent(event)
             elif phase == 1:
                 assert frame._context is None
                 assert frame.fields["board_file"].GetValue() == "—"
@@ -282,30 +299,33 @@ def main() -> int:
                 assert not frame.setup_panel.dirty
                 assert not frame.setup_panel.make_plan().changes
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 4
-                # Settings dialog: save the standards folder through the real OK binding.
+                assert frame.backup_path == base / 'settings' / 'backups'
+                assert frame.backups_button.IsEnabled()
+                with patch('project_manager.ui.wx.LaunchDefaultApplication', return_value=True) as launch:
+                    event = wx.CommandEvent(wx.EVT_BUTTON.typeId, frame.backups_button.GetId())
+                    frame.backups_button.GetEventHandler().ProcessEvent(event)
+                launch.assert_called_once_with(str(frame.backup_path))
+                # Save the standards folder through the real OK binding.
                 def save_dialog():
-                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, SettingsDialog) and w.IsModal()]
+                    dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, StandardsFolderDialog) and w.IsModal()]
                     assert len(dialogs) == 1
                     dialog = dialogs[0]
-                    assert dialog.backup_path == base / 'settings' / 'backups'
-                    assert dialog.backups_button.IsEnabled()
                     dialog.folder.SetPath(str(standards))
                     event = wx.CommandEvent(wx.EVT_BUTTON.typeId, wx.ID_OK)
                     dialog.GetEventHandler().ProcessEvent(event)
                 wx.CallLater(150, save_dialog)
-                frame.open_settings()
+                frame._choose_standards()
                 assert load_standards(base / 'settings') == str(standards.resolve())
                 frame.notebook.SetSelection(2)
                 phase = 6
             elif phase == 6:
-                panel = frame.standards_panel
-                if panel._busy:
+                panel = frame.rules_panel
+                if panel._busy or panel._catalog_busy:
                     wx.CallLater(100, check)
                     return
                 assert panel.catalog is not None and panel.catalog.name == 'Example standards'
                 assert not panel.compare_button.IsEnabled()
                 panel.choices['rules'].SetSelection(1)
-                panel.choices['stackups'].SetSelection(1)
                 panel._selection_changed()
                 assert 'Example rules' in panel.details.GetValue()
                 panel.set_context(standards_context)
@@ -314,7 +334,7 @@ def main() -> int:
                 panel._compare(None)
                 phase = 7
             elif phase in (7, 8):
-                panel = frame.standards_panel
+                panel = frame.rules_panel
                 if panel._busy:
                     wx.CallLater(100, check)
                     return
@@ -322,8 +342,17 @@ def main() -> int:
                 assert 'Protected' not in panel.summary.GetValue().split('missing from the saved project: ')[-1]
                 assert 'min_clearance' in panel.diff.GetValue()
                 assert 'company-rules block' in panel.summary.GetValue()
+                assert 'Existing shared rules that will change' in panel.summary.GetValue()
                 if phase == 7:
                     assert all(p.read_bytes() == data for p, data in before.items())
+                    assert panel.rule_values.GetItemCount() == 1
+                    assert panel.custom_rules.GetItemCount() == 1
+                    capture(frame, args.output.with_name('design-rules.png'))
+                    def accept_dependencies():
+                        dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
+                        assert len(dialogs) == 1
+                        dialogs[0].EndModal(wx.ID_OK)
+                    wx.CallLater(200, accept_dependencies)
                     phase = 8
                     panel._apply(None)
                     wx.CallLater(150, check)
@@ -344,12 +373,91 @@ def main() -> int:
                     assert '"name": "SIGNAL"' in project_text
                     assert std_board.read_bytes() == before[std_board]
                     assert (std_project.parent / 'kpm-standards.json').is_file()
-                    phase = 9
-                    frame.notebook.SetSelection(0)
-                    frame.SetSize((860, 640))
-                    source_script.write_bytes(source_script_before + b'# edited installed template\n')
-                    frame.refresh(discard=True)
-                    frame.Raise()
+                    frame.stackup_panel.set_context(standards_context)
+                    frame.notebook.SetSelection(3)
+                    phase = 80
+            elif phase == 80:
+                panel = frame.stackup_panel
+                if panel._catalog_busy or panel._snapshot_busy:
+                    wx.CallLater(100, check)
+                    return
+                panel.choices['stackups'].SetSelection(2)
+                panel._selection_changed()
+                assert len(panel.current_stackup.stack.copper) == 2
+                assert len(panel.selected_stackup.stack.copper) == 6
+                assert any(p.label == 'D3.2' for p in panel.selected_stackup.stack.layers)
+                assert 'Example Fab' in panel.selected('stackups').name
+                assert str(standards) in frame.standards_path.GetValue()
+                for removed in ('compare_button', 'preview_button', 'comparison_pane', 'summary', 'diff', 'capture_button'):
+                    assert not hasattr(panel, removed), f'Redundant stackup control: {removed}'
+                picker = panel.choices['stackups'].GetScreenRect()
+                apply = panel.apply_button.GetScreenRect()
+                assert abs((picker.y + picker.height / 2) - (apply.y + apply.height / 2)) <= 2
+                assert apply.x > picker.right, 'Apply must follow the preset selector'
+                assert panel.stackup_arrow.GetFont().GetPointSize() >= 30
+                assert not isinstance(panel.appearance, wx.CollapsiblePane)
+                for override in panel.overrides.values():
+                    assert override.IsShownOnScreen()
+                assert panel.appearance.GetSize().height <= panel.apply_button.GetSize().height + 4
+                capture(frame, args.output.with_name('stackup-preview.png'))
+                (std_project.parent / '~sample.kicad_pcb.lck').write_text('Synthetic editor lock')
+                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, panel.apply_button.GetId())
+                panel.apply_button.GetEventHandler().ProcessEvent(event)
+                phase = 805
+            elif phase == 805:
+                panel = frame.stackup_panel
+                if panel._busy:
+                    wx.CallLater(100, check)
+                    return
+                assert panel.feedback.IsShown()
+                assert 'KiCad still has this project open' in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour() == MODIFIED_COLOUR
+                assert std_board.read_bytes() == before[std_board]
+                frame.SetSize((860, 640))
+                phase = 806
+            elif phase == 806:
+                panel = frame.stackup_panel
+                for line in panel.feedback.GetLabel().splitlines():
+                    assert panel.feedback.GetTextExtent(line).width <= panel.feedback.GetSize().width
+                assert panel.feedback.GetScreenRect().bottom <= panel.GetScreenRect().bottom
+                capture(frame, args.output.with_name('stackup-blocked-small.png'))
+                (std_project.parent / '~sample.kicad_pcb.lck').unlink()
+                frame.SetSize((1100, 940))
+                panel._apply(None)
+                phase = 81
+            elif phase == 81:
+                panel = frame.stackup_panel
+                if panel._busy or panel._snapshot_busy:
+                    wx.CallLater(100, check)
+                    return
+                assert len(panel.current_stackup.stack.copper) == 6
+                assert len(panel.selected_stackup.stack.copper) == 6
+                assert panel.current_stackup.stack.impedance_controlled
+                assert 'Stackup applied' in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert 'Example Fab · EX0616' in panel.current_stackup.title.GetLabel()
+                assert 'settings differ' not in panel.current_stackup.title.GetLabel()
+                assert panel.current_stackup.details_button.GetScreenRect().right <= panel.current_stackup.GetScreenRect().right
+                assert_header_layout()
+                capture(frame, args.output.with_name('stackup-applied.png'))
+                before = {p: p.read_bytes() for p in (std_project, std_board, std_board.with_suffix('.kicad_dru'))}
+                panel._apply(None)
+                phase = 82
+            elif phase == 82:
+                panel = frame.stackup_panel
+                if panel._busy or panel._snapshot_busy:
+                    wx.CallLater(100, check)
+                    return
+                assert 'already applied' in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert all(p.read_bytes() == data for p, data in before.items())
+                assert len(list((base / 'settings').rglob('manifest.json'))) == 6
+                phase = 9
+                frame.notebook.SetSelection(0)
+                frame.SetSize((860, 640))
+                source_script.write_bytes(source_script_before + b'# edited installed template\n')
+                frame.refresh(discard=True)
+                frame.Raise()
             elif phase == 9:
                 assert frame.template_comparison is None
                 assert 'Installed template modified' in frame._template_status_text
@@ -361,12 +469,14 @@ def main() -> int:
                     frame._template_details(None)
                 assert 'kibot_resources/scripts/helper.py' in details.call_args.args[1]
                 assert_template_layout()
+                assert_header_layout()
                 small_status_height = frame.template_status.GetSize().height
                 capture(frame, args.output.with_name('template-modified-small.png'))
                 phase = 10
                 frame.SetSize((1200, 840))
             elif phase == 10:
                 assert_template_layout()
+                assert_header_layout()
                 assert frame.template_status.GetSize().height <= small_status_height
                 phase = 11
                 frame.SetSize((860, 640))

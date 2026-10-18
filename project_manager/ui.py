@@ -11,10 +11,10 @@ import wx
 
 from . import NAME, __version__
 from .context import ContextError, ProjectContext
-from .preferences import kicad_user_template_directory, save_template
+from .preferences import data_directory, kicad_user_template_directory, save_template, load_standards
 from .setup import read_setup, suggested_metadata
 from .setup_ui import ProjectSetupPanel
-from .settings_ui import SettingsDialog
+from .settings_ui import StandardsFolderDialog
 from .standards_ui import StandardsPanel
 from .templates import Comparison, TemplateSourceError, apply_upgrade, compare, load_template, resolve_template
 from .template_ui import (MATCH_COLOUR as FOUND_COLOUR, MODIFIED_COLOUR, MISSING_COLOUR,
@@ -23,7 +23,7 @@ from .yaml_fields import SetupError
 
 class ProjectManagerFrame(wx.Frame):
     def __init__(self, provider: Callable[[], ProjectContext], storage: Path | None = None):
-        super().__init__(None, title=f"{NAME} — {__version__}", size=(980, 840))
+        super().__init__(None, title=f"{NAME} — {__version__}", size=(1100, 940))
         self._provider = provider
         self.storage = storage
         self._closing = False
@@ -39,19 +39,13 @@ class ProjectManagerFrame(wx.Frame):
 
         panel = wx.Panel(self)
         layout = wx.BoxSizer(wx.VERTICAL)
-        header = wx.BoxSizer(wx.HORIZONTAL)
-        self.status = wx.StaticText(panel, label="Reading the active project…")
-        header.Add(self.status, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 12)
-        self.refresh_button = wx.Button(panel, label="Refresh")
-        self.refresh_button.Bind(wx.EVT_BUTTON, lambda event: self.refresh())
-        header.Add(self.refresh_button)
-        self.settings_button = wx.Button(panel, label='Settings…')
-        self.settings_button.Bind(wx.EVT_BUTTON, lambda event: self.open_settings())
-        header.Add(self.settings_button, 0, wx.LEFT, 8)
-        layout.Add(header, 0, wx.EXPAND | wx.ALL, 16)
-
         self.notebook = wx.Notebook(panel)
-        overview = self.overview = wx.Panel(self.notebook)
+        self.refresh_button = wx.Button(panel, label="Refresh")
+        self.refresh_button.SetToolTip('Refresh the active project and reload the standards catalog.')
+        self.refresh_button.Bind(wx.EVT_BUTTON, lambda event: self.refresh())
+        self.notebook.Bind(wx.EVT_SIZE, self._on_notebook_size)
+        overview = self.overview = wx.ScrolledWindow(self.notebook, style=wx.VSCROLL)
+        overview.SetScrollRate(0, 12)
         overview_layout = wx.BoxSizer(wx.VERTICAL)
         box = wx.StaticBoxSizer(wx.VERTICAL, overview, "Active project")
         grid = wx.FlexGridSizer(cols=2, vgap=12, hgap=16)
@@ -93,12 +87,40 @@ class ProjectManagerFrame(wx.Frame):
             actions.Add(button, 0, wx.RIGHT, 8)
         template_box.Add(actions, 0, wx.TOP, 6)
         grid.Add(template_box, 1, wx.EXPAND)
+        grid.Add(wx.StaticText(box.GetStaticBox(), label='Standards repository'), 0, wx.ALIGN_CENTER_VERTICAL)
+        standards_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.standards_path = wx.TextCtrl(box.GetStaticBox(), value='No standards folder selected',
+                                         style=wx.TE_READONLY | wx.BORDER_NONE)
+        self.standards_path.SetMinSize((1, -1))
+        standards_row.Add(self.standards_path, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        change_standards = wx.Button(box.GetStaticBox(), label='Change…')
+        change_standards.Bind(wx.EVT_BUTTON, lambda event: self._choose_standards())
+        standards_row.Add(change_standards)
+        grid.Add(standards_row, 1, wx.EXPAND)
+        grid.AddSpacer(0)
+        self.standards_status = wx.StaticText(box.GetStaticBox(), label='Choose a shared standards repository above.')
+        self.standards_status.SetMinSize((1, -1))
+        grid.Add(self.standards_status, 1, wx.EXPAND)
+        grid.Add(wx.StaticText(box.GetStaticBox(), label='Backups folder'), 0, wx.ALIGN_CENTER_VERTICAL)
+        backups_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.backup_path = (storage or data_directory()) / 'backups'
+        self.backups_path = wx.TextCtrl(box.GetStaticBox(), value=str(self.backup_path),
+                                       style=wx.TE_READONLY | wx.BORDER_NONE)
+        self.backups_path.SetMinSize((1, -1))
+        self.backups_path.SetToolTip(str(self.backup_path))
+        backups_row.Add(self.backups_path, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        self.backups_button = wx.Button(box.GetStaticBox(), label='Open Backups')
+        self.backups_button.SetToolTip('Backups are grouped by project and save time. Available after the first saved change.')
+        self.backups_button.Bind(wx.EVT_BUTTON, self._open_backups)
+        self.backups_button.Enable(self.backup_path.is_dir())
+        backups_row.Add(self.backups_button)
+        grid.Add(backups_row, 1, wx.EXPAND)
         box.Add(grid, 1, wx.EXPAND | wx.ALL, 14)
         overview_layout.Add(box, 0, wx.EXPAND | wx.ALL, 16)
 
         self._overview_note_text = ('Review template changes and add missing files here. '
                                     'Project Setup edits metadata and documentation status. '
-                                    'Standards applies company rules and stackup after the PCB and schematic editors are closed.')
+                                    'Design Rules and Stackup use the shared standards repository. Apply after the PCB and schematic editors are closed.')
         note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text)
         note.SetMinSize((1, -1))
         overview_layout.Add(note, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
@@ -109,10 +131,16 @@ class ProjectManagerFrame(wx.Frame):
         self.notebook.AddPage(overview, 'Overview', select=True)
         self.setup_panel = ProjectSetupPanel(self.notebook, self._on_applied, storage, self._verify_project)
         self.notebook.AddPage(self.setup_panel, 'Project Setup')
-        self.standards_panel = StandardsPanel(self.notebook, self.open_settings, storage,
-                                              self._on_standards_applied, self._verify_standards)
-        self.notebook.AddPage(self.standards_panel, 'Standards')
-        layout.Add(self.notebook, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 16)
+        self.rules_panel = StandardsPanel(self.notebook, storage,
+                                         self._on_standards_applied, self._verify_standards,
+                                         kind='rules', on_catalog=self._on_catalog)
+        self.stackup_panel = StandardsPanel(self.notebook, storage,
+                                           self._on_standards_applied, self._verify_standards,
+                                           kind='stackups', on_catalog=self._on_catalog)
+        self.standards_panels = (self.rules_panel, self.stackup_panel)
+        self.notebook.AddPage(self.rules_panel, 'Design Rules')
+        self.notebook.AddPage(self.stackup_panel, 'Stackup')
+        layout.Add(self.notebook, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         footer = wx.BoxSizer(wx.HORIZONTAL)
         footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9"), 1, wx.ALIGN_CENTER_VERTICAL)
         close = wx.Button(panel, id=wx.ID_CLOSE)
@@ -131,6 +159,24 @@ class ProjectManagerFrame(wx.Frame):
 
     def _append_log(self, message: str) -> None:
         self.log.AppendText(f"{datetime.now():%H:%M:%S}  {message}\n")
+        self.backups_button.Enable(self.backup_path.is_dir())
+
+    def _on_notebook_size(self, event):
+        # Keep the native tabs and use the unused right end of their strip.
+        wx.CallAfter(self._layout_notebook_header)
+        event.Skip()
+
+    def _layout_notebook_header(self):
+        if self._closing or not self.notebook.GetPageCount():
+            return
+        height = (self.notebook.GetCurrentPage().GetScreenPosition().y
+                  - self.notebook.GetScreenPosition().y)
+        size = self.refresh_button.GetBestSize()
+        self.refresh_button.SetSize(size)
+        origin = self.notebook.GetPosition()
+        self.refresh_button.SetPosition((origin.x + max(0, self.notebook.GetClientSize().width - size.width - 8),
+                                         origin.y + max(0, (height - size.height) // 2)))
+        self.refresh_button.Raise()
 
     def _on_overview_size(self, event):
         self._queue_overview_layout()
@@ -149,6 +195,8 @@ class ProjectManagerFrame(wx.Frame):
         # Always start from the original text so widening also removes old wraps.
         for control, value, width in (
                 (self.template_status, self._template_status_text, self._template_box.GetSize().width),
+                (self.standards_status, self.standards_status.GetToolTipText() or self.standards_status.GetLabel(),
+                 self._template_box.GetSize().width),
                 (self._overview_note, self._overview_note_text, self.overview.GetClientSize().width - 32)):
             control.SetMinSize((1, -1))
             control.SetLabel(value)
@@ -156,6 +204,7 @@ class ProjectManagerFrame(wx.Frame):
             control.InvalidateBestSize()
             control.SetMinSize((1, control.GetBestSize().height))
         self.overview.Layout()
+        self.overview.FitInside()
 
     def _set_template_status(self, value: str, colour):
         self._template_status_text = value
@@ -164,27 +213,48 @@ class ProjectManagerFrame(wx.Frame):
         self.template_status.SetForegroundColour(colour)
         self._queue_overview_layout()
 
-    def open_settings(self):
-        with SettingsDialog(self, self.storage) as dialog:
+    def _choose_standards(self):
+        if any(panel._busy for panel in self.standards_panels):
+            return
+        with StandardsFolderDialog(self, self.storage) as dialog:
             if dialog.ShowModal() == wx.ID_OK:
-                self.standards_panel.reload_catalog()
+                for panel in self.standards_panels:
+                    panel.reload_catalog()
+
+    def _open_backups(self, event):
+        self.backups_button.Enable(self.backup_path.is_dir())
+        if self.backup_path.is_dir() and not wx.LaunchDefaultApplication(str(self.backup_path)):
+            wx.MessageBox(f'Could not open the folder. Copy this path into your file manager:\n{self.backup_path}',
+                          'Backups', wx.OK | wx.ICON_ERROR, self)
+
+    def _on_catalog(self, catalog, error):
+        folder = load_standards(self.storage)
+        self.standards_path.ChangeValue(folder or 'No standards folder selected')
+        self.standards_path.SetToolTip(folder)
+        status = (f'{catalog.name} · {len(catalog.rules)} rule profiles · {len(catalog.stackups)} stackups'
+                  if catalog else error or 'Choose a shared standards repository above.')
+        self.standards_status.SetLabel(status)
+        self.standards_status.SetToolTip(status)
+        self._queue_overview_layout()
 
     def refresh(self, discard: bool = False) -> None:
-        if self._busy or self._closing:
+        if self._busy or self._closing or any(panel._busy for panel in self.standards_panels):
             return
         if not discard and not self._can_discard():
             return
         self._busy = True
         self.refresh_button.Disable()
-        self.status.SetLabel("Reading the active project…")
+        self.backups_button.Enable(self.backup_path.is_dir())
         self.setup_panel.clear('Reading project setup…')
-        self.standards_panel.set_context(None)
+        for panel in self.standards_panels:
+            panel.set_context(None)
         self.template_comparison = None
         self.choose_template_button.Disable()
         self.template_details_button.Disable()
         self.template_review_button.Disable()
         template_directory = kicad_user_template_directory()
-        self.standards_panel.reload_catalog()
+        for panel in self.standards_panels:
+            panel.reload_catalog()
 
         def worker() -> None:
             context, error, setup_result = None, None, None
@@ -226,7 +296,8 @@ class ProjectManagerFrame(wx.Frame):
         self.template_comparison = None
         self.template_source = None
         self.template_error_details = None
-        self.standards_panel.set_context(context if not error else None)
+        for panel in self.standards_panels:
+            panel.set_context(context if not error else None)
         if error or context is None:
             for field in self.fields.values():
                 field.ChangeValue("—")
@@ -234,7 +305,6 @@ class ProjectManagerFrame(wx.Frame):
                 field.SetToolTip("")
             self.template_path.ChangeValue('—')
             self._set_template_status('Project unavailable', self._neutral_colour)
-            self.status.SetLabel("Project unavailable — see activity below")
             self.setup_panel.clear(error or 'Project unavailable. Click Refresh to reconnect.')
             self._append_log(error or "No project was returned.")
             return
@@ -262,7 +332,6 @@ class ProjectManagerFrame(wx.Frame):
                 self.template_error_details = f'Template: {source or "not selected"}\n\n{template_error}'
             self._set_template_status(message, MISSING_COLOUR if template_error else self._neutral_colour)
         self.Layout()
-        self.status.SetLabel(f"Connected — {context.project_name}")
         self._append_log("Project information refreshed.")
         if setup_result:
             snapshot, values, setup_error = setup_result
@@ -337,6 +406,8 @@ class ProjectManagerFrame(wx.Frame):
             raise SetupError('The active project changed. Refresh before applying these edits.')
 
     def _verify_standards(self):
+        if any(panel._busy for panel in self.standards_panels):
+            raise SetupError('Wait for the current standards operation to finish before applying another change.')
         try:
             current = self._provider()
         except ContextError:
@@ -356,6 +427,11 @@ class ProjectManagerFrame(wx.Frame):
                              wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self) == wx.YES
 
     def _on_close(self, event: wx.CloseEvent) -> None:
+        if event.CanVeto() and any(panel._busy for panel in self.standards_panels):
+            self._append_log('Wait for the current standards operation to finish before closing.')
+            self.notebook.SetSelection(0)
+            event.Veto()
+            return
         if event.CanVeto() and not self._can_discard():
             event.Veto()
             return
