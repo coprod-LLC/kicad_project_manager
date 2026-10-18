@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import time
+import traceback
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -418,8 +419,10 @@ def main() -> int:
             elif phase == 806:
                 panel = frame.stackup_panel
                 for line in panel.feedback.GetLabel().splitlines():
-                    assert panel.feedback.GetTextExtent(line).width <= panel.feedback.GetSize().width
-                assert panel.feedback.GetScreenRect().bottom <= panel.GetScreenRect().bottom
+                    width = panel.feedback.GetTextExtent(line).width
+                    assert width <= panel.feedback.GetSize().width, f'Feedback text clips: {width} > {panel.feedback.GetSize().width}: {line}'
+                assert panel.feedback.GetScreenRect().bottom <= panel.GetScreenRect().bottom, (
+                    f'Feedback below viewport: {panel.feedback.GetScreenRect()}, panel {panel.GetScreenRect()}')
                 capture(frame, args.output.with_name('stackup-blocked-small.png'))
                 (std_project.parent / '~sample.kicad_pcb.lck').unlink()
                 frame.SetSize((1100, 940))
@@ -495,6 +498,7 @@ def main() -> int:
                 return
             wx.CallLater(150, check)
         except Exception as exc:
+            traceback.print_exc()
             failures.append(str(exc) or type(exc).__name__)
             frame.Destroy()
 
