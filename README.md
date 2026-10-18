@@ -255,7 +255,7 @@ local rules are refused. Broken markers from an earlier apply must still be
 restored explicitly. The non-UI planning API requires explicit opt-in before
 proposing adoption of differing rule values.
 
-Constraints update matching keys in `board.design_settings.rules`. Legacy presets
+Constraints update matching keys in `board.design_settings.rules`. Rule profiles
 can also supply netclass definitions, merged by name; assignments, patterns and
 other classes stay. Stackup updates copper, dielectric plies, impedance control,
 finish and any included silk/paste/mask layers. Omitted physical entries are
@@ -267,6 +267,13 @@ Stackups are maintained in the standards repository. Manufacturer recommendation
 internal preference and prior use are independent metadata;
 nominal order thickness and manufacturer finished thickness are distinct from
 KiCad's calculated physical total. Routing guidance does not assign nets or set widths.
+
+Catalog schema 2 discovers self-contained JSON presets under `stackups/`
+recursively. Adding, editing or deleting a stackup changes just its file, followed
+by **Refresh**. Each file includes metadata, the native physical definition,
+source evidence and optional impedance guidance. Copper declarations and thickness
+summaries are derived on load; there is no shared stackup index or checksum file.
+The old catalog format is rejected. See [the catalog format](docs/standards-format.md).
 
 Each apply records the preset id, source file hashes, and the standards checkout
 commit when that folder is a Git repository, plus explicit appearance overrides, in `kpm-standards.json` next to the
@@ -332,7 +339,7 @@ In a development virtual environment:
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.5.0
+python -m scripts.build_release --tag v0.6.0
 ```
 
 The ZIP uses an explicit file allowlist. Tests verify archive contents, entrypoint
@@ -362,8 +369,8 @@ Use short feature branches and pull requests into `main`. To release:
 3. Tag that commit with `vMAJOR.MINOR.PATCH` and push the tag.
 
 ```sh
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 The release workflow checks out the exact tag, tests and packages it, publishes a

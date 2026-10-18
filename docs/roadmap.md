@@ -55,7 +55,14 @@ checkout. No per-project submodule is required.
    set enabled layers, but it has no setters for custom rules, constraints, net
    classes, or the physical stackup, so this step edits the saved files instead
    of the open editor.
-4. Add Git URL, branch/tag, local checkout, and an explicit Fetch/Update action to
+4. Done in v0.6.0: catalog schema 2 discovers one self-contained JSON file per
+   stackup. Native physical text, metadata, source evidence and impedance guidance
+   stay together. Derive copper declarations and summaries at load time; record
+   document hashes on apply. Reject schema 1; remove the shared stackup index and
+   committed checksum manifest.
+5. Add Save saved-board stackup as preset: metadata form, duplicate/similar
+   construction review, single-file write and catalog refresh.
+6. Add Git URL, branch/tag, local checkout, and an explicit Fetch/Update action to
    Settings. Reuse the user's Git authentication. Work offline from the local
    checkout; catalog updates must never automatically reapply project standards.
 

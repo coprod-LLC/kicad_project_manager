@@ -18,20 +18,25 @@ RULES = '''(version 1)
 
 def catalog_folder(root: Path) -> Path:
     root.mkdir(parents=True)
-    files = {'stackup.sexpr': STACKUP, 'layers.sexpr': LAYERS, 'rules.kicad_dru': RULES,
+    files = {'rules.kicad_dru': RULES,
              'constraints.json': json.dumps({'board': {'design_settings': {'rules': {'min_clearance': 0.2}}}}),
              'classes.json': json.dumps({'net_settings': {'classes': [{'name': 'SIGNAL', 'clearance': 0.2}]}})}
     for name, text in files.items():
         (root / name).write_text(text, encoding='utf-8')
-    data = {'schema_version': 1, 'kicad_major': 9, 'name': 'Example standards', 'status': 'draft',
-            'stackups': [{'id': 'two_layer', 'name': 'Two-layer example', 'copper_layer_count': 2,
-                         'board_thickness_mm': 1.6, 'copper': [{'layer': 'F.Cu', 'thickness_mm': 0.035},
-                                                           {'layer': 'B.Cu', 'thickness_mm': 0.035}],
-                         'stackup_file': 'stackup.sexpr', 'copper_layers_file': 'layers.sexpr'}],
+    write_stackup(root / 'stackups/two_layer.json', 'two_layer', 'Two-layer example', STACKUP)
+    data = {'schema_version': 2, 'kicad_major': 9, 'name': 'Example standards',
             'rules': [{'id': 'example_rules', 'name': 'Example rules', 'custom_rules_file': 'rules.kicad_dru',
                        'constraints_file': 'constraints.json', 'netclass_definitions_file': 'classes.json'}]}
     (root / 'catalog.json').write_text(json.dumps(data), encoding='utf-8')
     return root
+
+
+def write_stackup(path: Path, pid: str, name: str, native: str, **metadata) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {'schema_version': 1, 'kicad_major': 9, 'id': pid, 'name': name,
+            'status': 'draft', **metadata, 'stackup': native.splitlines()}
+    path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    return path
 
 
 def saved_board(root: Path) -> tuple[Path, Path]:
@@ -68,22 +73,7 @@ def detailed_catalog(root: Path) -> Path:
                '(layer "B.Paste" (type "Bottom Solder Paste"))',
                '(layer "B.SilkS" (type "Bottom Silk Screen") (color "White") (material "Direct Printing"))']
     native = '(stackup\n' + '\n'.join(layers) + '\n(copper_finish "ENIG") (dielectric_constraints yes))\n'
-    copper = '(layers ' + ' '.join(f'({idx} "{name}" signal)'
-                                  for idx, name in zip([0, 4, 6, 8, 10, 2], names)) + ')'
-    entry = {'id': 'example_six_layer', 'name': 'Example Fab EX0616', 'status': 'draft',
-             'manufacturer': 'Example Fab', 'manufacturer_stackup_id': 'EX0616',
-             'nominal_thickness_mm': 1.6, 'outer_copper_oz': 1, 'inner_copper_oz': 0.5,
-             'copper_layer_count': 6, 'board_thickness_mm': 1.58,
-             'copper': [{'layer': name, 'thickness_mm': 0.035 if i in (0, 5) else 0.0175}
-                        for i, name in enumerate(names)],
-             'stackup_file': 'stackups/example_fab/ex0616/stackup.sexpr',
-             'copper_layers_file': 'stackups/example_fab/ex0616/copper_layers.sexpr'}
-    files = {'stackup_file': native, 'copper_layers_file': copper}
-    for key, text in files.items():
-        path = root / entry[key]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    data = json.loads((root / 'catalog.json').read_text())
-    data['stackups'].append(entry)
-    (root / 'catalog.json').write_text(json.dumps(data))
+    write_stackup(root / 'stackups/example_fab/ex0616.json', 'example_six_layer', 'Example Fab EX0616', native,
+                  manufacturer='Example Fab', manufacturer_stackup_id='EX0616',
+                  nominal_thickness_mm=1.6, outer_copper_oz=1, inner_copper_oz=0.5)
     return root

@@ -382,7 +382,8 @@ def main() -> int:
                 if panel._catalog_busy or panel._snapshot_busy:
                     wx.CallLater(100, check)
                     return
-                panel.choices['stackups'].SetSelection(2)
+                index = next(i for i, preset in enumerate(panel.catalog.stackups, 1) if preset.id == 'example_six_layer')
+                panel.choices['stackups'].SetSelection(index)
                 panel._selection_changed()
                 assert len(panel.current_stackup.stack.copper) == 2
                 assert len(panel.selected_stackup.stack.copper) == 6

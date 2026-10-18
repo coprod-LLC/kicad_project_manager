@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath
 import re
 
@@ -158,44 +159,101 @@ def _netclasses(text: str) -> list[dict]:
         raise StandardsError('Invalid netclass definitions.') from exc
 
 
-def _stackup(entry: dict, files: dict) -> None:
+def _stackup_data(native: str) -> tuple[dict, str]:
+    """Derive neutral KiCad 9 copper declarations and summaries from one definition."""
     from .stackup import parse_stackup
-    physical = parse_stackup(files['stackup_file'])
+    physical = parse_stackup(native)
     copper = []
     for layer in physical.copper:
         if layer.thickness_mm is None or layer.thickness_mm <= 0:
             raise StandardsError('Each copper layer requires one positive thickness.')
         copper.append({'layer': layer.name, 'thickness_mm': layer.thickness_mm})
-    layer_nodes = _root(files['copper_layers_file'], 'layers')
-    layers = [atoms(node)[1] for nodes in layer_nodes.values() for node in nodes]
     expected = ['F.Cu', *[f'In{i}.Cu' for i in range(1, len(copper) - 1)], 'B.Cu']
-    if not 2 <= len(copper) <= 32 or len(copper) % 2 or layers != expected or [c['layer'] for c in copper] != layers:
+    if not 2 <= len(copper) <= 32 or len(copper) % 2 or [c['layer'] for c in copper] != expected:
         raise StandardsError('Copper layers must be in physical order, F.Cu through B.Cu, with an even count.')
-    if type(entry.get('copper_layer_count')) is not int or entry['copper_layer_count'] != len(copper):
-        raise StandardsError('Catalog copper_layer_count disagrees with the stackup files.')
-    thickness = _number(entry.get('board_thickness_mm'), 'Board thickness')
-    if not math.isclose(physical.total_mm, thickness, abs_tol=1e-6):
-        raise StandardsError('Board thickness disagrees with the sum of the physical stackup, including masks.')
-    if entry.get('copper') != copper:
-        raise StandardsError('Catalog copper thicknesses disagree with the stackup file.')
+    declarations = ['(layers']
+    for index, name in enumerate(expected):
+        number = 0 if index == 0 else 2 if index == len(expected) - 1 else 2 * index + 2
+        declarations.append(f'  ({number} "{name}" signal)')
+    declarations.append(')')
+    return {'copper_layer_count': len(copper), 'board_thickness_mm': _number(physical.total_mm, 'Stackup thickness'),
+            'copper': copper}, '\n'.join(declarations) + '\n'
+
+
+def _stackup_documents(root: Path) -> list[tuple[dict, str, str]]:
+    directory = root / 'stackups'
+    if directory.is_symlink():
+        raise StandardsError('Symbolic links inside the catalog are unsupported: stackups.')
+    if not directory.exists():
+        return []
+    if not directory.is_dir():
+        raise StandardsError('stackups must be a directory.')
+    documents = []
+    def walk_error(error):
+        raise error
+    for current, dirs, names in os.walk(directory, onerror=walk_error, followlinks=False):
+        dirs.sort()
+        for name in (*dirs, *names):
+            path = Path(current) / name
+            if path.is_symlink():
+                raise StandardsError(f'Symbolic links inside the catalog are unsupported: {path.relative_to(root)}.')
+        for name in sorted(names):
+            if not name.endswith('.json'):
+                continue
+            relative = (Path(current) / name).relative_to(root).as_posix()
+            text = _file(root, relative)
+            try:
+                documents.append((_json(text), text, relative))
+            except StandardsError as exc:
+                raise StandardsError(f'{relative}: {exc}') from exc
+            if len(documents) > 100:
+                raise StandardsError('stackups must contain at most 100 presets.')
+    return documents
+
+
+def _embedded_stackup(entry: dict, source: tuple[str, str]) -> tuple[dict, dict]:
+    text, relative = source
+    if type(entry.get('schema_version')) is not int or entry['schema_version'] != 1:
+        raise StandardsError('Stackup documents must use schema_version 1.')
+    if type(entry.get('kicad_major')) is not int or entry['kicad_major'] != 9:
+        raise StandardsError('Stackup documents must target KiCad 9.')
+    derived_fields = {'copper_layer_count', 'board_thickness_mm', 'copper',
+                      'stackup_file', 'copper_layers_file', 'preset_file'}
+    if derived_fields.intersection(entry):
+        raise StandardsError('Stackup documents must derive copper layers and thickness from stackup; remove summary and file-path fields.')
+    lines = entry.get('stackup')
+    if (not isinstance(lines, list) or not lines
+            or any(not isinstance(line, str) or '\n' in line or '\r' in line for line in lines)):
+        raise StandardsError('stackup must be a nonempty array of native KiCad text lines.')
+    if 'source_evidence' in entry and not isinstance(entry['source_evidence'], dict):
+        raise StandardsError('source_evidence must be an object.')
+    native = '\n'.join(lines) + '\n'
+    derived, copper = _stackup_data(native)
+    details = {key: value for key, value in entry.items() if key != 'stackup'}
+    details.update(derived, preset_file=relative)
+    return details, {'stackup_file': native, 'copper_layers_file': copper, 'preset_file': text}
 
 
 def load_catalog(folder: Path) -> Catalog:
     try:
         root = folder.expanduser().resolve(strict=True)
         data = _json(_file(root, 'catalog.json'))
-        if type(data.get('schema_version')) is not int or data['schema_version'] != 1:
-            raise StandardsError('This plugin supports catalog schema_version 1.')
+        version = data.get('schema_version')
+        if type(version) is not int or version != 2:
+            raise StandardsError('This plugin requires catalog schema_version 2 with self-contained stackup documents.')
         if type(data.get('kicad_major')) is not int or data['kicad_major'] != 9:
             raise StandardsError('Choose a catalog for KiCad 9.')
         name = _string(data.get('name'), 'Catalog name')
+        if 'stackups' in data:
+            raise StandardsError('Catalog schema_version 2 discovers stackups/*.json recursively; remove the stackups list.')
+        documents = _stackup_documents(root)
         groups = {}
         for kind in ('rules', 'stackups'):
-            entries = data.get(kind)
+            entries = [entry for entry, _text, _path in documents] if kind == 'stackups' else data.get(kind)
             if not isinstance(entries, list) or len(entries) > 100:
                 raise StandardsError(f'{kind} must be a list of at most 100 presets.')
             presets, seen = [], set()
-            for entry in entries:
+            for index, entry in enumerate(entries):
                 if not isinstance(entry, dict):
                     raise StandardsError('Each preset must be an object.')
                 pid = _string(entry.get('id'), 'Preset ID')
@@ -203,12 +261,18 @@ def load_catalog(folder: Path) -> Catalog:
                     raise StandardsError('Preset IDs must be unique lowercase names within each category.')
                 seen.add(pid)
                 title = _string(entry.get('name'), 'Preset name')
-                status = entry.get('status', data.get('status', 'draft'))
+                status = entry.get('status', 'draft')
                 if status not in ('draft', 'reviewed', 'deprecated'):
                     raise StandardsError('Preset status must be draft, reviewed, or deprecated.')
-                keys = ('custom_rules_file', 'constraints_file') if kind == 'rules' else ('stackup_file', 'copper_layers_file')
-                files = {key: _file(root, entry.get(key)) for key in keys}
-                details = dict(entry)
+                if kind == 'stackups':
+                    try:
+                        details, files = _embedded_stackup(entry, documents[index][1:])
+                    except StandardsError as exc:
+                        raise StandardsError(f'{documents[index][2]}: {exc}') from exc
+                else:
+                    keys = ('custom_rules_file', 'constraints_file')
+                    files = {key: _file(root, entry.get(key)) for key in keys}
+                    details = dict(entry)
                 from .stackup import validate_metadata, stackup_label
                 validate_metadata(details)
                 if kind == 'rules':
@@ -229,7 +293,6 @@ def load_catalog(folder: Path) -> Catalog:
                         files['netclass_definitions_file'] = _file(root, entry['netclass_definitions_file'])
                         _netclasses(files['netclass_definitions_file'])
                 else:
-                    _stackup(entry, files)
                     title = stackup_label(details)
                 presets.append(Preset(pid, title, kind, status, details, files))
             groups[kind] = tuple(presets)

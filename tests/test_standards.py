@@ -111,7 +111,8 @@ class StandardsTests(unittest.TestCase):
 
     def test_unknown_versions_duplicate_ids_and_bad_types_rejected(self):
         original = (self.folder / 'catalog.json').read_bytes()
-        for mutate in [lambda d: d.update(schema_version=2), lambda d: d.update(schema_version=True),
+        for mutate in [lambda d: d.update(schema_version=1), lambda d: d.update(schema_version=3),
+                       lambda d: d.update(schema_version=True), lambda d: d.update(stackups=[]),
                        lambda d: d.update(kicad_major=10), lambda d: d['rules'].append(d['rules'][0]),
                        lambda d: d['rules'][0].update(id='BAD'), lambda d: d['rules'][0].update(status='unknown'),
                        lambda d: d.update(rules={}), lambda d: d['rules'][0].update(required_netclasses='bad')]:
@@ -138,17 +139,20 @@ class StandardsTests(unittest.TestCase):
         with self.assertRaisesRegex(StandardsError, 'only'):
             load_catalog(self.folder)
 
-    def test_stackup_manifest_must_match_actual_files(self):
-        original = (self.folder / 'catalog.json').read_bytes()
+    def test_stackup_documents_reject_redundant_summaries(self):
+        path = self.folder / 'stackups/two_layer.json'
+        original = path.read_bytes()
         for field, value in [('board_thickness_mm', 1.8), ('copper_layer_count', 4), ('copper', [])]:
             with self.subTest(field=field):
-                self.edit(lambda d: d['stackups'][0].update({field: value}))
+                data = json.loads(original)
+                data[field] = value
+                path.write_text(json.dumps(data))
                 with self.assertRaises(StandardsError):
                     load_catalog(self.folder)
-                (self.folder / 'catalog.json').write_bytes(original)
+                path.write_bytes(original)
 
     def test_multiple_dielectric_sublayers_are_counted(self):
-        path = self.folder / 'stackup.sexpr'
+        path = self.folder / 'stackups/two_layer.json'
         path.write_text(path.read_text().replace('(thickness 1.53)', '(thickness 0.53) addsublayer (thickness 1.0)'))
         self.assertEqual(len(load_catalog(self.folder).stackups), 1)
 

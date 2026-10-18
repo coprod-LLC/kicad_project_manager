@@ -18,7 +18,7 @@ class StackupTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.folder = detailed_catalog(self.base / 'standards')
         self.catalog = load_catalog(self.folder)
-        self.preset = self.catalog.stackups[1]
+        self.preset = next(p for p in self.catalog.stackups if p.id == 'example_six_layer')
         self.project, self.board = saved_board(self.base / 'project')
         self.store = self.base / 'settings'
 
@@ -66,7 +66,7 @@ class StackupTests(unittest.TestCase):
     def test_retained_masks_are_included_in_applied_thickness(self):
         self.board.write_text(self.board.read_text().replace('(setup (stackup',
                               '(setup (stackup (layer "F.Mask" (type "Top Solder Mask") (thickness 0.03))'))
-        partial = self.catalog.stackups[0]
+        partial = next(p for p in self.catalog.stackups if p.id == 'two_layer')
         apply_standards(plan_standards(self.project, self.board, None, partial), self.store)
         actual = read_board_stackup(self.board)
         self.assertAlmostEqual(actual.board_thickness_mm, 1.63)
@@ -90,14 +90,14 @@ class StackupTests(unittest.TestCase):
                          hashlib.sha256(selected.files['stackup_file'].encode()).hexdigest())
 
     def test_metadata_is_validated_and_guidance_does_not_assign_nets(self):
-        path = self.folder / 'catalog.json'
+        path = self.folder / self.preset.details['preset_file']
         original = path.read_text()
         for update in [{'manufacturer_recommended': 'yes'}, {'outer_copper_oz': -1},
                        {'source_url': 'file:///outside'}, {'recommendation_checked': 'yesterday'},
                        {'impedance_targets': [{'mode': 'differential', 'impedance_ohms': 100,
                                                'track_width_mm': 0.2, 'pair_gap_mm': 0}]}]:
             data = json.loads(original)
-            data['stackups'][1].update(update)
+            data.update(update)
             path.write_text(json.dumps(data))
             with self.subTest(update=update), self.assertRaises(StandardsError):
                 load_catalog(self.folder)
@@ -106,7 +106,7 @@ class StackupTests(unittest.TestCase):
     def test_saved_construction_is_identified_without_provenance(self):
         current = read_board_stackup(self.board).physical
         matches = matching_stackups(current, self.catalog.stackups)
-        self.assertEqual([match.preset.id for match in matches], [self.catalog.stackups[0].id])
+        self.assertEqual([match.preset.id for match in matches], ['two_layer'])
         self.assertTrue(matches[0].exact)
         self.assertEqual(stackup_identity(matches[0].preset), 'Two-layer example')
         self.assertEqual(matching_stackups(None, self.catalog.stackups), ())

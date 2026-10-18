@@ -463,6 +463,8 @@ def _entry(preset: Preset, catalog_name: str, commit: str, dirty: bool) -> dict:
              'files': {key: hashlib.sha256(value.encode()).hexdigest() for key, value in sorted(preset.files.items())}}
     if catalog_name:
         entry['catalog'] = catalog_name
+    if preset.details.get('preset_file'):
+        entry['preset_file'] = preset.details['preset_file']
     if commit:
         entry['source_commit'] = commit
     if dirty:
