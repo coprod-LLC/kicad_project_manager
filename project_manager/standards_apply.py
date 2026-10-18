@@ -23,11 +23,17 @@ FILE_LIMIT = 128 * 1024 * 1024
 _SKIP_DIRS = {'.git', 'kibot_out', '__pycache__', '.history'}
 
 
+class EditorsOpenError(StandardsError):
+    """Applying is blocked until the project's KiCad editors are closed."""
+
+
 @dataclass(frozen=True)
 class StandardsPlan:
     root: Path
     changes: tuple[Change, ...]
     summary: str
+    missing_dependencies: tuple[str, ...] = ()
+    adopts_existing_rules: bool = False
 
     def diff(self) -> str:
         parts = []
@@ -141,7 +147,8 @@ def _marker_spans(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
     return begins, ends
 
 
-def merge_custom_rules(text: str, preset: Preset, *, commit: str = '', dirty: bool = False) -> str:
+def merge_custom_rules(text: str, preset: Preset, *, commit: str = '', dirty: bool = False,
+                       allow_rule_adoption: bool = False) -> str:
     """Replace the one company-rules block. Text outside that block is copied unchanged."""
     block = _company_block(preset, commit, dirty)
     if '\r\n' in text:
@@ -170,6 +177,16 @@ def merge_custom_rules(text: str, preset: Preset, *, commit: str = '', dirty: bo
                                  + ', '.join(collision) + '. Rename those project rules before applying.')
         return text[:begins[0][0]] + block + text[ends[0][1]:]
     collision = sorted(set(preset_names) & set(_rule_names(text)))
+    if collision and COMPANY_NOTE not in text:
+        existing = list(found[1:])
+        incoming = [node for name, node in forms(preset.files['custom_rules_file']) if name == 'rule']
+        prefix = existing[:len(incoming)]
+        # Keep rule order. Changed values require an explicitly requested adoption
+        # proposal, which the UI always routes through the exact diff review.
+        if len(prefix) == len(incoming) and all(name == 'rule' and atoms(text[start:end])[1] == atoms(node)[1]
+                                               and (allow_rule_adoption or canonical(text[start:end]) == canonical(node))
+                                               for (name, start, end), node in zip(prefix, incoming)):
+            return text[:prefix[0][1]] + block + text[prefix[-1][2]:]
     if collision and set(collision) == set(preset_names):
         raise StandardsError('These company rules are already in the file, but the begin/end markers are missing. '
                              'Restore the markers before applying so the project rules are not duplicated.')
@@ -224,10 +241,11 @@ def _raw_from_atom(node: str, index: int) -> str:
 
 def _with_user_name(preset_node: str, old_node: str | None) -> str:
     preset_node = preset_node.strip()
-    if old_node is None or len(atoms(preset_node)) >= 4:
+    if old_node is None:
         return preset_node
-    extra = _raw_from_atom(old_node, 3)
-    return preset_node if not extra else preset_node[:-1].rstrip() + ' ' + extra + ')'
+    # Layer function and display name belong to the project, not its manufacturer.
+    left, _right, _token = _atom_bounds(preset_node, 2)
+    return preset_node[:left] + _raw_from_atom(old_node, 2) + ')'
 
 
 def _merge_layers(layers_form: str, preset_form: str) -> str:
@@ -391,7 +409,6 @@ def merge_board(text: str, stackup: Preset) -> tuple[str, list[str], list[str], 
     if len(thickness_nodes) != 1:
         raise StandardsError('The board has no single general thickness to update.')
     current_thickness = float(atoms(thickness_nodes[0])[1])
-    general = _merge_thickness(original_general, stackup.details['board_thickness_mm'])
     ops = []
     if new_layers != layers_form:
         ops.append((layers_start, layers_end, new_layers))
@@ -404,7 +421,11 @@ def merge_board(text: str, stackup: Preset) -> tuple[str, list[str], list[str], 
         indent = _indent_at(text, setup_start) + '\t'
         close = _indent_at(text, setup_end - 1)
         body = stackup.files['stackup_file'].strip()
+        merged = body
         ops.append((setup_end - 1, setup_end - 1, '\n' + indent + body + '\n' + close))
+    from .stackup import parse_stackup
+    # Legacy presets may omit masks; include retained physical layers in the total.
+    general = _merge_thickness(original_general, parse_stackup(merged).total_mm)
     if general != original_general:
         ops.append((general_start, general_end, general))
     for start, end, replacement in sorted(ops, reverse=True):
@@ -446,6 +467,10 @@ def _entry(preset: Preset, catalog_name: str, commit: str, dirty: bool) -> dict:
         entry['source_commit'] = commit
     if dirty:
         entry['source_dirty'] = True
+    if preset.details.get('applied_overrides'):
+        entry['appearance_overrides'] = preset.details['applied_overrides']
+        entry['applied_file_hashes'] = entry['files']
+        entry['files'] = preset.details['source_file_hashes']
     return entry
 
 
@@ -488,7 +513,7 @@ def _change(root: Path, path: Path, before: bytes | None, text: str, bom: bool) 
 
 
 def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: Preset | None,
-          catalog: Catalog | None) -> StandardsPlan:
+          catalog: Catalog | None, *, allow_rule_adoption: bool = False) -> StandardsPlan:
     if rules is None and stackup is None:
         raise StandardsError('Select a rules or stackup preset first.')
     for path in (project_file, board_file):
@@ -518,7 +543,8 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
         raise StandardsError('Comparison currently supports the KiCad 9 board file format (20241229).')
     commit, dirty = _source_identity(catalog.root if catalog else None)
     catalog_name = catalog.name if catalog else ''
-    summary, changes = [], []
+    summary, changes, missing_dependencies = [], [], []
+    adopts_existing_rules = False
     if rules is not None:
         summary += ['', 'Rules: ' + rules.name,
                     'Custom rules update one marked company-rules block. Rules outside that block are kept.',
@@ -534,13 +560,25 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
                                   ('referenced_net_names', nets, 'Named nets')]:
             missing = set(rules.details.get(key, [])) - names
             summary.append(f'{label} missing from the saved project: ' + (', '.join(sorted(missing)) or 'none'))
+            missing_dependencies.extend(f'{label}: {name}' for name in sorted(missing))
         if 'netclass_definitions_file' in rules.files:
             summary.append('Net class definitions in the preset are updated by name. Assignments and other net classes are kept.')
         merged_project = _merge_project(project_text, rules)
         project_change = _change(root, project_path, project_bytes, merged_project, project_bom)
         if project_change:
             changes.append(project_change)
-        merged_dru = merge_custom_rules(dru_text, rules, commit=commit, dirty=dirty)
+        merged_dru = merge_custom_rules(dru_text, rules, commit=commit, dirty=dirty,
+                                        allow_rule_adoption=allow_rule_adoption)
+        adopts_existing_rules = (COMPANY_BEGIN not in dru_text and
+                                bool(set(_rule_names(dru_text)) & set(_rule_names(rules.files['custom_rules_file']))))
+        if adopts_existing_rules:
+            old = [node for name, node in forms(dru_text) if name == 'rule']
+            incoming = [node for name, node in forms(rules.files['custom_rules_file']) if name == 'rule']
+            changed_rules = [atoms(node)[1] for current, node in zip(old, incoming) if canonical(current) != canonical(node)]
+            summary.append('Applying will adopt the ' + ('existing' if changed_rules else 'identical existing')
+                           + ' rule prefix into the managed company block. Rule order and later project exceptions are retained.')
+            if changed_rules:
+                summary.append('Existing shared rules that will change (review the exact diff): ' + ', '.join(changed_rules))
         dru_change = _change(root, dru_path, dru_bytes, merged_dru, dru_bom)
         if dru_change:
             changes.append(dru_change)
@@ -555,9 +593,12 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
             note = 'unused copper layers will be removed'
         else:
             note = 'copper layer list will change; other layers stay'
+        from .stackup import board_stackup_from_text, physical_summary
+        effective = board_stackup_from_text(merged_board).physical
         summary += ['', 'Stackup: ' + stackup.name,
                     f'Copper layers: {len(old_names)} → {len(new_names)} ({note})',
-                    f'Total thickness: {thickness:g} → {stackup.details["board_thickness_mm"]:g} mm',
+                    f'Total thickness: {thickness:g} → {effective.total_mm:g} mm',
+                    physical_summary(effective),
                     'Copper, dielectric, and copper-finish entries follow the preset. Other physical layers, such as mask and silk, stay unless the preset includes them.']
         board_change = _change(root, board_path, board_bytes, merged_board, board_bom)
         if board_change:
@@ -576,13 +617,13 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
     lock_message = editor_lock_message(root)
     if lock_message:
         summary.append(lock_message)
-    return StandardsPlan(root, tuple(changes), '\n'.join(summary).strip())
+    return StandardsPlan(root, tuple(changes), '\n'.join(summary).strip(), tuple(missing_dependencies), adopts_existing_rules)
 
 
 def plan_standards(project_file: Path, board_file: Path, rules: Preset | None, stackup: Preset | None,
-                   catalog: Catalog | None = None) -> StandardsPlan:
+                   catalog: Catalog | None = None, *, allow_rule_adoption: bool = False) -> StandardsPlan:
     try:
-        return _plan(project_file, board_file, rules, stackup, catalog)
+        return _plan(project_file, board_file, rules, stackup, catalog, allow_rule_adoption=allow_rule_adoption)
     except StandardsError:
         raise
     except (ExpressionError, JsonTextError, OSError, ValueError, IndexError, KeyError, TypeError) as exc:
@@ -592,7 +633,7 @@ def plan_standards(project_file: Path, board_file: Path, rules: Preset | None, s
 def apply_standards(plan: StandardsPlan, storage: Path | None = None) -> Path | None:
     message = editor_lock_message(plan.root)
     if message:
-        raise StandardsError(message)
+        raise EditorsOpenError(message)
     try:
         return commit_changes(plan.root, plan.changes, storage, limit=FILE_LIMIT)
     except SetupError as exc:

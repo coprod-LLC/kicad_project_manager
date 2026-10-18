@@ -34,8 +34,13 @@ checkout. No per-project submodule is required.
 
 1. Done in v0.3.0: Settings dialog with a standards-folder picker, catalog
    schema validation, and the backup location with an Open Backups button.
-2. Done in v0.3.0: Standards tab with separate Rules and Stackup dropdowns,
-   dependency details, and a read-only comparison with the saved project files.
+2. Done in v0.5.0: separate Design Rules and Stackup tabs, shared-source path/status
+   and backup controls on Overview, one Refresh beside the tabs, current/proposed
+   stackup drawings, complete dielectric ply and
+   surface properties, manufacturer metadata and optional routing guidance.
+   Identify saved constructions by manufacturer and code from their actual layer data.
+   Apply beside the preset selector; mask, silkscreen and finish overrides stay visible.
+   Rule constraints and custom rules have readable tables with dependency reports.
    Tests use synthetic data; company examples stay outside this repository.
 3. Done in v0.3.0: apply selected presets to saved files. Custom rules update
    one marked company-rules block and leave every other rule untouched; KiCad's
@@ -54,8 +59,8 @@ checkout. No per-project submodule is required.
    Settings. Reuse the user's Git authentication. Work offline from the local
    checkout; catalog updates must never automatically reapply project standards.
 
-Draft extracted snapshots are preparation data, not approved fabrication limits
-or an implemented importer. Review dependencies and comment/value discrepancies
+Draft extracted snapshots are preparation data, not approved fabrication limits.
+Review dependencies and comment/value discrepancies
 before turning a project snapshot into a reusable company preset.
 
 ### KiCad 9 application feasibility

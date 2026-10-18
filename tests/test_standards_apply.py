@@ -98,10 +98,43 @@ class ApplyStandardsTests(unittest.TestCase):
         self.assertIn(b'(rule "After" (constraint clearance (min 1mm)))\r\n', text.encode('utf-8'))
         self.assertNotIn('\n(rule "After"', text.replace('\r\n', ''))
 
+    def test_identical_existing_prefix_can_be_adopted_without_moving_project_exceptions(self):
+        catalog = load_catalog(self.folder)
+        preset = catalog.rules[0]
+        dru = self.board.with_suffix('.kicad_dru')
+        exception = '(rule "Local exception" (constraint courtyard_clearance (min -1mm)))\n'
+        dru.write_text('# Existing header stays\n' + preset.files['custom_rules_file'] + exception)
+        plan = plan_standards(self.project, self.board, preset, None, catalog)
+        self.assertTrue(plan.adopts_existing_rules)
+        self.assertIn('identical existing rule prefix', plan.summary)
+        apply_standards(plan, self.store)
+        saved = dru.read_text()
+        self.assertTrue(saved.startswith('# Existing header stays\n'))
+        self.assertEqual(saved.count('(rule "Test domain"'), 1)
+        self.assertLess(saved.index(COMPANY_END), saved.index(exception))
+        again = plan_standards(self.project, self.board, preset, None, catalog)
+        self.assertFalse(again.adopts_existing_rules)
+        self.assertFalse(again.changes)
+
+    def test_existing_rules_with_different_values_or_interleaved_priority_are_not_adopted(self):
+        catalog = load_catalog(self.folder)
+        preset = catalog.rules[0]
+        dru = self.board.with_suffix('.kicad_dru')
+        for text in [preset.files['custom_rules_file'].replace('0.2mm', '0.8mm'),
+                     '(version 1)\n(rule "Local first" (constraint clearance (min 1mm)))\n'
+                     + preset.files['custom_rules_file'].split('(version 1)', 1)[1]]:
+            with self.subTest(text=text):
+                dru.write_text(text)
+                before = dru.read_bytes()
+                with self.assertRaises(StandardsError):
+                    plan_standards(self.project, self.board, preset, None)
+                self.assertEqual(dru.read_bytes(), before)
+
     def test_net_assignments_and_other_classes_stay(self):
         data = json.loads(self.project.read_text())
         data['net_settings']['classes'].append({'name': 'HV', 'clearance': 0.5, 'pcb_color': 'rgb(1, 2, 3)'})
         data['net_settings']['netclass_assignments'] = {'VBAT': ['HV']}
+        data['net_settings']['netclass_patterns'] = [{'pattern': 'VBAT*', 'netclass': 'HV'}]
         self.project.write_text(json.dumps(data, indent=2) + '\n')
         catalog = load_catalog(self.folder)
         apply_standards(plan_standards(self.project, self.board, catalog.rules[0], None), self.store)
@@ -110,6 +143,25 @@ class ApplyStandardsTests(unittest.TestCase):
         self.assertEqual(hv['pcb_color'], 'rgb(1, 2, 3)')
         self.assertEqual(hv['clearance'], 0.5)
         self.assertEqual(saved['net_settings']['netclass_assignments'], {'VBAT': ['HV']})
+        self.assertEqual(saved['net_settings']['netclass_patterns'], [{'pattern': 'VBAT*', 'netclass': 'HV'}])
+
+    def test_changed_shared_prefix_requires_explicit_adoption_proposal(self):
+        catalog = load_catalog(self.folder)
+        preset = catalog.rules[0]
+        dru = self.board.with_suffix('.kicad_dru')
+        local = '(rule "Local last" (constraint clearance (min 1mm)))\n'
+        dru.write_text(preset.files['custom_rules_file'].replace('0.2mm', '0.8mm') + local)
+        before = dru.read_bytes()
+        with self.assertRaises(StandardsError):
+            plan_standards(self.project, self.board, preset, None)
+        plan = plan_standards(self.project, self.board, preset, None, catalog, allow_rule_adoption=True)
+        self.assertTrue(plan.adopts_existing_rules)
+        self.assertIn('Existing shared rules that will change', plan.summary)
+        self.assertIn('-  (constraint clearance (min 0.8mm)))', plan.diff())
+        self.assertEqual(dru.read_bytes(), before)
+        apply_standards(plan, self.store)
+        self.assertIn(local, dru.read_text())
+        self.assertFalse(plan_standards(self.project, self.board, preset, None, catalog).changes)
 
     def test_stackup_keeps_mask_layers_nicknames_and_board_body(self):
         self.board.write_text(
@@ -161,7 +213,7 @@ class ApplyStandardsTests(unittest.TestCase):
                            'stackup_file': '(stackup (layer "F.Cu" (type "copper") (thickness 0.035)) '
                                            '(layer "dielectric 1" (type "prepreg") (thickness 0.2)) '
                                            '(layer "In1.Cu" (type "copper") (thickness 0.035)) '
-                                           '(layer "dielectric 2" (type "core") (thickness 1.36)) '
+                                           '(layer "dielectric 2" (type "core") (thickness 1.16)) '
                                            '(layer "In2.Cu" (type "copper") (thickness 0.035)) '
                                            '(layer "dielectric 3" (type "prepreg") (thickness 0.2)) '
                                            '(layer "B.Cu" (type "copper") (thickness 0.035)) '

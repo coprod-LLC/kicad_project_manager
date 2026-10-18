@@ -159,19 +159,13 @@ def _netclasses(text: str) -> list[dict]:
 
 
 def _stackup(entry: dict, files: dict) -> None:
-    physical = _root(files['stackup_file'], 'stackup')
-    total, copper = 0.0, []
-    for layer in physical.get('layer', []):
-        values = atoms(layer)
-        children = _children(layer)
-        thicknesses = [float(atoms(t)[1]) for t in children.get('thickness', [])]
-        if any(not math.isfinite(t) or t < 0 for t in thicknesses):
-            raise StandardsError('Layer thicknesses must be finite and nonnegative.')
-        total += sum(thicknesses)
-        if atoms(_one(children, 'type'))[1] == 'copper':
-            if len(thicknesses) != 1 or thicknesses[0] <= 0:
-                raise StandardsError('Each copper layer requires one positive thickness.')
-            copper.append({'layer': values[1], 'thickness_mm': thicknesses[0]})
+    from .stackup import parse_stackup
+    physical = parse_stackup(files['stackup_file'])
+    copper = []
+    for layer in physical.copper:
+        if layer.thickness_mm is None or layer.thickness_mm <= 0:
+            raise StandardsError('Each copper layer requires one positive thickness.')
+        copper.append({'layer': layer.name, 'thickness_mm': layer.thickness_mm})
     layer_nodes = _root(files['copper_layers_file'], 'layers')
     layers = [atoms(node)[1] for nodes in layer_nodes.values() for node in nodes]
     expected = ['F.Cu', *[f'In{i}.Cu' for i in range(1, len(copper) - 1)], 'B.Cu']
@@ -180,7 +174,7 @@ def _stackup(entry: dict, files: dict) -> None:
     if type(entry.get('copper_layer_count')) is not int or entry['copper_layer_count'] != len(copper):
         raise StandardsError('Catalog copper_layer_count disagrees with the stackup files.')
     thickness = _number(entry.get('board_thickness_mm'), 'Board thickness')
-    if not math.isclose(total, thickness, abs_tol=1e-6):
+    if not math.isclose(physical.total_mm, thickness, abs_tol=1e-6):
         raise StandardsError('Board thickness disagrees with the sum of the physical stackup, including masks.')
     if entry.get('copper') != copper:
         raise StandardsError('Catalog copper thicknesses disagree with the stackup file.')
@@ -215,6 +209,8 @@ def load_catalog(folder: Path) -> Catalog:
                 keys = ('custom_rules_file', 'constraints_file') if kind == 'rules' else ('stackup_file', 'copper_layers_file')
                 files = {key: _file(root, entry.get(key)) for key in keys}
                 details = dict(entry)
+                from .stackup import validate_metadata, stackup_label
+                validate_metadata(details)
                 if kind == 'rules':
                     nodes = list(forms(files['custom_rules_file']))
                     if not nodes or nodes[0][0] != 'version' or atoms(nodes[0][1]) != ['version', '1']:
@@ -234,6 +230,7 @@ def load_catalog(folder: Path) -> Catalog:
                         _netclasses(files['netclass_definitions_file'])
                 else:
                     _stackup(entry, files)
+                    title = stackup_label(details)
                 presets.append(Preset(pid, title, kind, status, details, files))
             groups[kind] = tuple(presets)
         if not groups['rules'] and not groups['stackups']:
@@ -251,23 +248,40 @@ def preset_details(preset: Preset | None) -> str:
     data = preset.details
     lines = [f'{preset.name} ({preset.status})']
     if preset.kind == 'stackups':
-        lines += [f'{data["copper_layer_count"]} copper layers · {data["board_thickness_mm"]:g} mm total',
-                  'Copper: ' + ', '.join(f'{v["layer"]} {v["thickness_mm"]:g} mm' for v in data['copper'])]
+        from .stackup import parse_stackup, physical_summary, recommendation_text
+        lines += [physical_summary(parse_stackup(preset.files['stackup_file'])), recommendation_text(data)]
+        if data.get('used_in'):
+            lines.append('Previously used in: ' + ', '.join(data['used_in']))
+        if data.get('finished_thickness_mm'):
+            tolerance = data.get('thickness_tolerance_percent')
+            lines.append(f'Manufacturer finished thickness: {data["finished_thickness_mm"]:g} mm'
+                         + (f' ±{tolerance:g}%' if tolerance else ''))
+        for target in data.get('impedance_targets', []):
+            lines.append(f'Routing guidance: {target["impedance_ohms"]:g} Ω {target["mode"].replace("_", " ")} · '
+                         f'{target.get("geometry", "geometry unspecified")} · width {target["track_width_mm"]:g} mm'
+                         + (f' / gap {target["pair_gap_mm"]:g} mm' if 'pair_gap_mm' in target else '')
+                         + f' · layer {target.get("layer", "unconfirmed")} / reference {target.get("reference_layer", "unconfirmed")}'
+                         + (' · ' + target['notes'] if target.get('notes') else ''))
     else:
         lines.append(f'{data["rule_count"]} custom rules')
         for key, label in [('required_netclasses', 'Netclasses'), ('referenced_rule_areas', 'Named areas'),
                            ('referenced_net_names', 'Named nets')]:
             lines.append(f'{label}: ' + (', '.join(data[key]) or 'none declared or detected'))
+    for key, label in [('description', 'Purpose'), ('notes', 'Notes'), ('source_url', 'Source')]:
+        if data.get(key):
+            lines.append(f'{label}: {data[key]}')
+    if data.get('assumptions'):
+        lines.append('Assumptions: ' + '; '.join(data['assumptions']))
     if preset.status == 'draft':
         lines.append('Draft sample — review before using it on a board.')
     return '\n'.join(lines)
 
 
 def compare(project_file: Path, board_file: Path, rules: Preset | None, stackup: Preset | None,
-            catalog: Catalog | None = None) -> Comparison:
+            catalog: Catalog | None = None, *, allow_rule_adoption: bool = False) -> Comparison:
     """Describe the saved-file edits an apply would make. This does not write."""
     from .standards_apply import plan_standards
-    plan = plan_standards(project_file, board_file, rules, stackup, catalog)
+    plan = plan_standards(project_file, board_file, rules, stackup, catalog, allow_rule_adoption=allow_rule_adoption)
     summary = ['Comparison uses files saved on disk. Unsaved editor changes are not included.',
                'No project files were changed.', plan.summary]
     return Comparison('\n'.join(summary), plan.diff() or 'No differences in the compared settings.')

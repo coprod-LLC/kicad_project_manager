@@ -1,16 +1,16 @@
-"""Per-computer standards source and backup location."""
+"""Choose and validate the shared standards repository."""
 from __future__ import annotations
 
 from pathlib import Path
 import wx
 
-from .preferences import data_directory, load_standards, save_settings
+from .preferences import load_standards, save_settings
 from .standards import load_catalog
 
 
-class SettingsDialog(wx.Dialog):
+class StandardsFolderDialog(wx.Dialog):
     def __init__(self, parent, storage: Path | None = None):
-        super().__init__(parent, title='Project Manager Settings', size=(740, 440),
+        super().__init__(parent, title='Standards Repository', size=(740, 280),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.storage = storage
         layout = wx.BoxSizer(wx.VERTICAL)
@@ -27,26 +27,13 @@ class SettingsDialog(wx.Dialog):
         box.Add(hint, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
         layout.Add(box, 0, wx.EXPAND | wx.ALL, 14)
 
-        box = wx.StaticBoxSizer(wx.VERTICAL, self, 'Project Backups')
-        self.backup_path = (storage or data_directory()) / 'backups'
-        text = wx.TextCtrl(box.GetStaticBox(), value=str(self.backup_path), style=wx.TE_READONLY)
-        box.Add(text, 0, wx.EXPAND | wx.ALL, 12)
-        hint = wx.StaticText(box.GetStaticBox(), label='Original files are grouped by project, then by save time. Each backup includes a manifest identifying the project and changed files.')
-        hint.Wrap(660)
-        box.Add(hint, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-        self.backups_button = wx.Button(box.GetStaticBox(), label='Open Backups')
-        self.backups_button.Enable(self.backup_path.is_dir())
-        self.backups_button.SetToolTip('Available after the first saved project change.')
-        self.backups_button.Bind(wx.EVT_BUTTON, self._open_backups)
-        box.Add(self.backups_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
-        layout.Add(box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
         layout.AddStretchSpacer()
         buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
-        self.FindWindowById(wx.ID_OK).SetLabel('Save Settings')
+        self.FindWindowById(wx.ID_OK).SetLabel('Use Folder')
         self.Bind(wx.EVT_BUTTON, self._save, id=wx.ID_OK)
         layout.Add(buttons, 0, wx.EXPAND | wx.ALL, 14)
         self.SetSizer(layout)
-        self.SetMinSize((680, 440))
+        self.SetMinSize((680, 280))
         self.Fit()
         self.CentreOnParent()
 
@@ -57,11 +44,6 @@ class SettingsDialog(wx.Dialog):
                 value = str(load_catalog(Path(value)).root)
             save_settings({'standards_directory': value}, self.storage)
         except (OSError, ValueError) as exc:
-            wx.MessageBox(str(exc), 'Settings', wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(str(exc), 'Standards repository', wx.OK | wx.ICON_ERROR, self)
             return
         self.EndModal(wx.ID_OK)
-
-    def _open_backups(self, event):
-        if not wx.LaunchDefaultApplication(str(self.backup_path)):
-            wx.MessageBox(f'Could not open the folder. Copy this path into your file manager:\n{self.backup_path}',
-                          'Backups', wx.OK | wx.ICON_ERROR, self)

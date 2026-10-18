@@ -45,3 +45,45 @@ def saved_board(root: Path) -> tuple[Path, Path]:
                      '(footprint "a (# not a comment)" (property "Reference" "R1")))\n')
     board.with_suffix('.kicad_dru').write_text('(version 1)\n# existing exception stays untouched\n')
     return project, board
+
+
+def detailed_catalog(root: Path) -> Path:
+    """Synthetic six-layer construction with distinct dielectric plies and surfaces."""
+    catalog_folder(root)
+    layers = ['(layer "F.SilkS" (type "Top Silk Screen") (color "White") (material "Direct Printing"))',
+              '(layer "F.Paste" (type "Top Solder Paste"))',
+              '(layer "F.Mask" (type "Top Solder Mask") (color "Black") (thickness 0.02) (material "Resist") (epsilon_r 3.3) (loss_tangent 0))']
+    names = ['F.Cu', 'In1.Cu', 'In2.Cu', 'In3.Cu', 'In4.Cu', 'B.Cu']
+    gaps = [0.18, 0.3, None, 0.3, 0.18]
+    for i, name in enumerate(names):
+        layers.append(f'(layer "{name}" (type "copper") (thickness {0.035 if i in (0, 5) else 0.0175}))')
+        if i == 2:
+            layers.append('(layer "dielectric 3" (type "prepreg") (thickness 0.24 locked) '
+                          '(material "Weave A") (epsilon_r 4.2) (loss_tangent 0.02) '
+                          'addsublayer (thickness 0.2) (material "Weave B") (epsilon_r 3.8) (loss_tangent 0.018))')
+        elif i < 5:
+            layers.append(f'(layer "dielectric {i+1}" (type "{ "core" if i % 2 else "prepreg" }") '
+                          f'(thickness {gaps[i]}) (material "FR4") (epsilon_r 4.3) (loss_tangent 0.02))')
+    layers += ['(layer "B.Mask" (type "Bottom Solder Mask") (color "Black") (thickness 0.02) (material "Resist"))',
+               '(layer "B.Paste" (type "Bottom Solder Paste"))',
+               '(layer "B.SilkS" (type "Bottom Silk Screen") (color "White") (material "Direct Printing"))']
+    native = '(stackup\n' + '\n'.join(layers) + '\n(copper_finish "ENIG") (dielectric_constraints yes))\n'
+    copper = '(layers ' + ' '.join(f'({idx} "{name}" signal)'
+                                  for idx, name in zip([0, 4, 6, 8, 10, 2], names)) + ')'
+    entry = {'id': 'example_six_layer', 'name': 'Example Fab EX0616', 'status': 'draft',
+             'manufacturer': 'Example Fab', 'manufacturer_stackup_id': 'EX0616',
+             'nominal_thickness_mm': 1.6, 'outer_copper_oz': 1, 'inner_copper_oz': 0.5,
+             'copper_layer_count': 6, 'board_thickness_mm': 1.58,
+             'copper': [{'layer': name, 'thickness_mm': 0.035 if i in (0, 5) else 0.0175}
+                        for i, name in enumerate(names)],
+             'stackup_file': 'stackups/example_fab/ex0616/stackup.sexpr',
+             'copper_layers_file': 'stackups/example_fab/ex0616/copper_layers.sexpr'}
+    files = {'stackup_file': native, 'copper_layers_file': copper}
+    for key, text in files.items():
+        path = root / entry[key]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    data = json.loads((root / 'catalog.json').read_text())
+    data['stackups'].append(entry)
+    (root / 'catalog.json').write_text(json.dumps(data))
+    return root
