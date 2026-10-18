@@ -1,5 +1,5 @@
 """KiCad Project Manager: a small IPC project companion."""
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 NAME = "KiCad Project Manager"
-IDENTIFIER = "com.github.coprod-llc.kicad-project-manager"
+IDENTIFIER = "org.kicadprojectmanager.plugin"

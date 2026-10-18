@@ -381,16 +381,25 @@ class ProjectManagerFrame(wx.Frame):
     def _review_template(self, event):
         if self._busy or not self.template_comparison or not self._can_discard():
             return
+        applied = False
+
+        def apply_review(plan):
+            nonlocal applied
+            backup = apply_upgrade(plan, self.storage, self._verify_project)
+            applied = True
+            self._append_log(f'Template review applied. Backup: {backup}' if backup else 'Template files already match.')
+            return backup
+
         try:
             comparison = compare(self.template_comparison.root, load_template(self.template_source))
-            with TemplateReviewDialog(self, comparison) as dialog:
-                if dialog.ShowModal() != wx.ID_OK:
-                    return
-                backup = apply_upgrade(dialog.plan, self.storage, self._verify_project)
-            self._append_log(f'Template review applied. Backup: {backup}' if backup else 'Template files already match.')
-            self.refresh(discard=True)
+            with TemplateReviewDialog(self, comparison, apply_plan=apply_review) as dialog:
+                if dialog.ShowModal() == wx.ID_OK:
+                    apply_review(dialog.plan)
         except (SetupError, OSError) as exc:
             wx.MessageBox(str(exc), 'Template upgrade', wx.OK | wx.ICON_ERROR, self)
+        finally:
+            if applied:
+                self.refresh(discard=True)
 
     def _on_applied(self, backup: Path | None):
         self._append_log(f'Project setup saved. Backup: {backup}' if backup else 'No changes were needed.')

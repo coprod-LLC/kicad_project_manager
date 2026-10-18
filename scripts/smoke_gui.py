@@ -6,6 +6,7 @@ import argparse
 import faulthandler
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 import traceback
@@ -24,7 +25,7 @@ from project_manager.setup import read_setup
 from project_manager.setup_ui import PreviewDialog
 from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
                                         TemplateReviewDialog, item_colour)
-from project_manager.templates import STATE, compare, load_template
+from project_manager.templates import STATE, apply_upgrade, compare, load_template
 from project_manager.preferences import load_standards
 from project_manager.settings_ui import StandardsFolderDialog
 from tests.fixtures import sample_project
@@ -99,7 +100,7 @@ def main() -> int:
         assert set(colour.Get() for colour in expected.values()) == {
             MATCH_COLOUR.Get(), MODIFIED_COLOUR.Get(), MISSING_COLOUR.Get()}
         with TemplateDetailsDialog(frame, comparison) as dialog:
-            def inspect_details():
+            def inspect_details(dialog=dialog):
                 try:
                     contents = dialog.results.GetValue()
                     for item in comparison.items:
@@ -112,8 +113,9 @@ def main() -> int:
                     failures.append(f'Details colors: {exc}')
                 finally:
                     dialog.EndModal(wx.ID_OK)
-            wx.CallLater(200, inspect_details)
+            inspection = wx.CallLater(200, inspect_details)
             dialog.ShowModal()
+            inspection.Stop()
         assert not failures
         with TemplateReviewDialog(frame, comparison) as dialog:
             for index, item in enumerate(comparison.items):
@@ -132,15 +134,17 @@ def main() -> int:
         assert not (project / STATE).exists()
         assert read_setup(project).workflow is None
 
-        def accept_apply():
-            dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
-            assert len(dialogs) == 1
-            dialogs[0].EndModal(wx.ID_OK)
-
         def accept_review():
             dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog) and w.IsModal()]
             assert len(dialogs) == 1
             dialog = dialogs[0]
+            for row in range(dialog.files.GetItemCount()):
+                dialog.files.Select(row)
+            dialog._refresh_selection()
+            dialog.action.SetSelection(dialog.actions.index('use'))
+            dialog._action_changed(None)
+            for row in range(dialog.files.GetItemCount()):
+                dialog.files.Select(row, False)
             index = next(i for i, item in enumerate(dialog.comparison.items)
                          if item.path.endswith('/assembly_notes.txt'))
             dialog.files.Select(index)
@@ -148,13 +152,183 @@ def main() -> int:
             dialog.editor.SetValue('Project-specific assembly notes\n')
             assert dialog.choices[dialog.comparison.items[index].path] == 'edit'
             capture(dialog, args.output.with_name('template-review.png'))
-            wx.CallLater(150, accept_apply)
-            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, wx.ID_OK)
-            dialog.GetEventHandler().ProcessEvent(event)
+            with patch('project_manager.template_ui.PreviewDialog', side_effect=AssertionError('Unexpected preview')):
+                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.apply_button.GetId())
+                dialog.apply_button.GetEventHandler().ProcessEvent(event)
+            assert dialog.IsModal()
+            assert dialog.applied
+            # Closing after a direct save must refresh the parent without
+            # applying the old plan again or treating Close as an undo.
+            dialog.EndModal(wx.ID_CANCEL)
 
         wx.CallLater(150, accept_review)
-        print('GUI: applying template review', flush=True)
+        print('GUI: applying template review directly, then closing it', flush=True)
         frame._review_template(None)
+
+    def check_review_selection():
+        print('GUI: checking range selection, bulk actions and partial apply', flush=True)
+        source = template_folder(base / 'selection-template')
+        project = base / 'selection-project'
+        shutil.copytree(source.root, project)
+        theme = 'kibot_resources/colors/theme.json'
+        script = 'kibot_resources/scripts/helper.py'
+        document = 'kibot_resources/templates/assembly_notes.txt'
+        missing = 'kibot_resources/fonts/font.ttf'
+        (project / theme).write_text('{"theme": "project"}\n')
+        (project / script).write_text('print("project override")\n')
+        (project / document).write_text('Project notes\n')
+        (project / missing).unlink()
+        comparison = compare(project, source)
+        indices = {item.path: index for index, item in enumerate(comparison.items)}
+        with TemplateReviewDialog(frame, comparison) as dialog:
+            def select(*rows):
+                for row in dialog._selected_indices():
+                    dialog.files.Select(row, False)
+                for row in rows:
+                    dialog.files.Select(row)
+                dialog._refresh_selection()
+
+            def action(value):
+                dialog.action.SetSelection(dialog.actions.index(value))
+                dialog._action_changed(None)
+
+            def guard(callback):
+                def run():
+                    try:
+                        callback()
+                    except Exception:
+                        traceback.print_exc()
+                        failures.append('Template selection / partial apply failed')
+                        dialog.EndModal(wx.ID_CANCEL)
+                return run
+
+            def start_range():
+                assert not dialog.files.HasFlag(wx.LC_SINGLE_SEL)
+                for path in (theme, script, document, missing):
+                    assert dialog.choices[path] == 'review', path
+                select(0)
+                # Let native selection events update the action controls before
+                # checking the range. Keyboard/mouse simulation depends on the
+                # desktop granting focus, which headless CI does not guarantee.
+                dialog.files.Select(1)
+                wx.CallLater(150, guard(check_range))
+
+            def check_range():
+                assert dialog._selected_indices() == [0, 1], dialog._selected_indices()
+                assert dialog.selection_label.GetLabel() == '2 selected files:'
+                assert 'edit' not in dialog.actions
+                action('use')
+                assert all(dialog.choices[comparison.items[row].path] == 'use' for row in (0, 1))
+                assert dialog.choices[script] == 'review'
+                dialog.files.Select(indices[missing])
+                dialog._refresh_selection()
+                assert 'keep' not in dialog.actions
+                action('review')
+                assert all(dialog.choices[comparison.items[row].path] == 'review'
+                           for row in dialog._selected_indices())
+
+                select(indices[document])
+                dialog.editor.SetValue('Edited project notes\n')
+                assert dialog.choices[document] == 'edit'
+                dialog.files.Select(indices[script])
+                # An action arriving before deferred selection refresh must not
+                # spread the previous single-document editor across the range.
+                action('edit')
+                assert dialog.choices[script] == 'review'
+                assert not dialog.editor.IsEnabled()
+                assert 'edit' not in dialog.actions
+                assert dialog.action.GetSelection() == wx.NOT_FOUND
+                assert dialog.edits[document] == b'Edited project notes\n'
+                select(indices[document])
+                assert dialog.editor.GetValue() == 'Edited project notes\n'
+
+                select(indices[theme])
+                action('use')
+                select()
+                assert not dialog.action.IsEnabled()
+                assert not dialog.editor.IsEnabled()
+                select(indices[theme], indices[document])
+                capture(dialog, args.output.with_name('template-bulk-selection.png'))
+
+                def accept_preview():
+                    previews = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
+                    assert len(previews) == 1
+                    capture(previews[0], args.output.with_name('template-partial-preview.png'))
+                    previews[0].EndModal(wx.ID_OK)
+
+                wx.CallLater(150, accept_preview)
+                with patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected error')):
+                    dialog._preview(None)
+
+            wx.CallLater(150, guard(start_range))
+            assert dialog.ShowModal() == wx.ID_OK
+            plan = dialog.plan
+            assert {change.relative for change in plan.changes} == {theme, document, STATE}
+        apply_upgrade(plan, base / 'selection-backups')
+        assert (project / theme).read_bytes() == source.files[theme]
+        assert (project / document).read_text() == 'Edited project notes\n'
+        assert (project / script).read_text() == 'print("project override")\n'
+        assert not (project / missing).exists()
+        pending = {item.path for item in compare(project, source).problems}
+        assert pending == {script, missing}, pending
+
+        print('GUI: applying consecutive batches without closing template review', flush=True)
+        storage = base / 'direct-template-backups'
+        verified = []
+
+        def apply_direct(plan):
+            return apply_upgrade(plan, storage, verify=lambda: verified.append(True))
+
+        with TemplateReviewDialog(frame, compare(project, source), apply_plan=apply_direct) as dialog:
+            def check_direct_apply():
+                try:
+                    assert dialog.apply_button.GetScreenRect().x > dialog.preview_button.GetScreenRect().right
+
+                    def choose(path, value):
+                        for row in dialog._selected_indices():
+                            dialog.files.Select(row, False)
+                        dialog.files.Select(indices[path])
+                        dialog._refresh_selection()
+                        dialog.action.SetSelection(dialog.actions.index(value))
+                        dialog._action_changed(None)
+
+                    def click_apply():
+                        with patch('project_manager.template_ui.PreviewDialog', side_effect=AssertionError('Unexpected preview')), \
+                             patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected error')):
+                            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.apply_button.GetId())
+                            dialog.apply_button.GetEventHandler().ProcessEvent(event)
+                        assert dialog.IsModal(), 'Direct Apply closed the review window'
+
+                    choose(document, 'edit')
+                    dialog.editor.SetValue('Deferred document edit\n')
+                    choose(document, 'review')
+                    choose(script, 'use')
+                    click_apply()
+                    assert dialog.applied and verified
+                    assert (project / script).read_bytes() == source.files[script]
+                    assert not (project / missing).exists()
+                    assert dialog.choices[missing] == 'review'
+                    assert dialog.choices[document] == 'review'
+                    assert dialog.edits[document] == b'Deferred document edit\n'
+                    assert (project / document).read_text() == 'Edited project notes\n'
+                    assert next(item for item in dialog.comparison.items if item.path == script).status == 'Matches'
+                    backups = list(storage.rglob('manifest.json'))
+                    click_apply()
+                    assert list(storage.rglob('manifest.json')) == backups
+                    choose(missing, 'use')
+                    click_apply()
+                    assert (project / missing).read_bytes() == source.files[missing]
+                    assert not dialog.comparison.problems
+                    capture(dialog, args.output.with_name('template-direct-apply.png'))
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Direct template Apply failed')
+                finally:
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            wx.CallLater(150, check_direct_apply)
+            assert dialog.ShowModal() == wx.ID_CANCEL
+            assert dialog.applied
 
     def assert_template_layout():
         label = frame.template_label.GetScreenRect()
@@ -262,6 +436,7 @@ def main() -> int:
                 assert frame.template_comparison.colour == 'red'
                 assert read_setup(project).workflow is None
                 check_result_colours()
+                check_review_selection()
                 review_template()
                 phase = 31
             elif phase == 31:
@@ -387,10 +562,11 @@ def main() -> int:
                 panel._selection_changed()
                 assert len(panel.current_stackup.stack.copper) == 2
                 assert len(panel.selected_stackup.stack.copper) == 6
+                assert not panel.capture_button.IsShown(), 'The saved board matches the catalog regardless of the preview selection'
                 assert any(p.label == 'D3.2' for p in panel.selected_stackup.stack.layers)
                 assert 'Example Fab' in panel.selected('stackups').name
                 assert str(standards) in frame.standards_path.GetValue()
-                for removed in ('compare_button', 'preview_button', 'comparison_pane', 'summary', 'diff', 'capture_button'):
+                for removed in ('compare_button', 'preview_button', 'comparison_pane', 'summary', 'diff'):
                     assert not hasattr(panel, removed), f'Redundant stackup control: {removed}'
                 picker = panel.choices['stackups'].GetScreenRect()
                 apply = panel.apply_button.GetScreenRect()
@@ -441,6 +617,7 @@ def main() -> int:
                 assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
                 assert 'Example Fab · EX0616' in panel.current_stackup.title.GetLabel()
                 assert 'settings differ' not in panel.current_stackup.title.GetLabel()
+                assert not panel.capture_button.IsShown(), 'Applying a catalog stackup must hide Save as preset'
                 assert panel.current_stackup.details_button.GetScreenRect().right <= panel.current_stackup.GetScreenRect().right
                 assert_header_layout()
                 capture(frame, args.output.with_name('stackup-applied.png'))

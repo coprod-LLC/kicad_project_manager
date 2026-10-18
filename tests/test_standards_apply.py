@@ -6,11 +6,12 @@ from unittest.mock import patch
 import unittest
 
 from project_manager import setup
-from project_manager.standards import Preset, StandardsError, compare, load_catalog
+from project_manager.standards import StandardsError, load_catalog
+from project_manager.sexpr import atoms, forms
 from project_manager.standards_apply import (
     COMPANY_BEGIN, COMPANY_END, apply_standards, merge_custom_rules, plan_standards,
 )
-from tests.standards_fixtures import LAYERS, catalog_folder, saved_board
+from tests.standards_fixtures import catalog_folder, saved_board, write_stackup
 
 
 def run_git(folder: Path, *args: str) -> None:
@@ -26,6 +27,20 @@ class ApplyStandardsTests(unittest.TestCase):
         self.folder = catalog_folder(self.base / 'standards')
         self.project, self.board = saved_board(self.base / 'project')
         self.store = self.base / 'settings'
+
+    def four_layer_preset(self):
+        native = '''(stackup
+  (layer "F.Cu" (type "copper") (thickness 0.035))
+  (layer "dielectric 1" (type "prepreg") (thickness 0.2))
+  (layer "In1.Cu" (type "copper") (thickness 0.035))
+  (layer "dielectric 2" (type "core") (thickness 1.16))
+  (layer "In2.Cu" (type "copper") (thickness 0.035))
+  (layer "dielectric 3" (type "prepreg") (thickness 0.2))
+  (layer "B.Cu" (type "copper") (thickness 0.035))
+  (copper_finish "ENIG"))
+'''
+        write_stackup(self.folder / 'stackups/four_layer.json', 'four', 'Four layer', native)
+        return next(p for p in load_catalog(self.folder).stackups if p.id == 'four')
 
     def test_company_block_keeps_project_rules_and_is_idempotent(self):
         dru = self.board.with_suffix('.kicad_dru')
@@ -195,38 +210,28 @@ class ApplyStandardsTests(unittest.TestCase):
         self.assertIn('(legacy_teardrops no)', text)
 
     def test_used_copper_layer_is_not_removed(self):
+        apply_standards(plan_standards(self.project, self.board, None, self.four_layer_preset()), self.store)
         self.board.write_text(self.board.read_text().replace(
             '(footprint "a (# not a comment)" (property "Reference" "R1"))',
             '(segment (start 0 0) (end 1 1) (width 0.2) (layer "In1.Cu") (net 1))\n'
             '(footprint "a (# not a comment)" (property "Reference" "R1"))'))
-        layers = '(layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))\n'
-        self.board.write_text(self.board.read_text().replace(LAYERS, layers))
         before = self.board.read_bytes()
         catalog = load_catalog(self.folder)
+        two_layer = next(p for p in catalog.stackups if p.id == 'two_layer')
         with self.assertRaisesRegex(StandardsError, 'In1.Cu'):
-            plan_standards(self.project, self.board, None, catalog.stackups[0])
+            plan_standards(self.project, self.board, None, two_layer)
         self.assertEqual(self.board.read_bytes(), before)
 
     def test_inner_layers_can_be_added(self):
-        stack = Preset('four', 'Four layer', 'stackups', 'reviewed',
-                       {'board_thickness_mm': 1.7, 'copper_layer_count': 4}, {
-                           'stackup_file': '(stackup (layer "F.Cu" (type "copper") (thickness 0.035)) '
-                                           '(layer "dielectric 1" (type "prepreg") (thickness 0.2)) '
-                                           '(layer "In1.Cu" (type "copper") (thickness 0.035)) '
-                                           '(layer "dielectric 2" (type "core") (thickness 1.16)) '
-                                           '(layer "In2.Cu" (type "copper") (thickness 0.035)) '
-                                           '(layer "dielectric 3" (type "prepreg") (thickness 0.2)) '
-                                           '(layer "B.Cu" (type "copper") (thickness 0.035)) '
-                                           '(copper_finish "ENIG"))\n',
-                           'copper_layers_file': '(layers (0 "F.Cu" signal) (4 "In1.Cu" signal) '
-                                                 '(6 "In2.Cu" signal) (2 "B.Cu" signal))\n'})
+        stack = self.four_layer_preset()
         self.board.write_text(self.board.read_text().replace(
             '(footprint "a (# not a comment)" (property "Reference" "R1"))',
             '(footprint "a (# not a comment)" (property "Reference" "R1") (uuid "UUID-KEEP"))'))
         apply_standards(plan_standards(self.project, self.board, None, stack), self.store)
         text = self.board.read_text()
-        self.assertIn('(4 "In1.Cu" signal)', text)
-        self.assertIn('(6 "In2.Cu" signal)', text)
+        layers = next(node for name, node in forms(text, children=True) if name == 'layers')
+        copper = [atoms(node)[:2] for _name, node in forms(layers, children=True) if atoms(node)[1].endswith('.Cu')]
+        self.assertEqual(copper, [['0', 'F.Cu'], ['4', 'In1.Cu'], ['6', 'In2.Cu'], ['2', 'B.Cu']])
         self.assertIn('(uuid "UUID-KEEP")', text)
         self.assertIn('(thickness 1.7)', text)
 
@@ -269,13 +274,6 @@ class ApplyStandardsTests(unittest.TestCase):
         (self.folder / 'catalog.json').write_text((self.folder / 'catalog.json').read_text() + '\n')
         plan = plan_standards(self.project, self.board, catalog.rules[0], None, catalog)
         self.assertTrue(any(b'source_dirty' in change.after for change in plan.changes))
-
-    def test_compare_still_does_not_write(self):
-        catalog = load_catalog(self.folder)
-        before = {path: path.read_bytes() for path in self.base.rglob('*') if path.is_file()}
-        compare(self.project, self.board, catalog.rules[0], catalog.stackups[0], catalog)
-        self.assertEqual(before, {path: path.read_bytes() for path in self.base.rglob('*') if path.is_file()})
-
 
 if __name__ == '__main__':
     unittest.main()

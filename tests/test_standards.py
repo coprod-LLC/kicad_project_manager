@@ -40,12 +40,13 @@ class StandardsTests(unittest.TestCase):
         self.assertEqual(catalog.rules[0].details['required_netclasses'], ['SIGNAL'])
         self.assertEqual(catalog.rules[0].details['referenced_rule_areas'], ['Protected'])
         self.assertEqual(catalog.rules[0].details['referenced_net_names'], ['FRAME'])
-        self.assertIn('Draft sample', preset_details(catalog.stackups[0]))
+        self.assertNotIn('Draft', preset_details(catalog.stackups[0]))
+        self.assertEqual(catalog.stackups[0].status, '')
 
     def test_compare_reports_dependencies_and_diff_without_any_writes(self):
         before = {p: p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
         catalog = load_catalog(self.folder)
-        report = compare(self.project, self.board, catalog.rules[0], catalog.stackups[0])
+        report = compare(self.project, self.board, catalog.rules[0], catalog.stackups[0], catalog)
         self.assertIn('Netclasses missing from the saved project: SIGNAL', report.summary)
         self.assertIn('Named areas missing from the saved project: none', report.summary)
         self.assertIn('Named nets missing from the saved project: none', report.summary)
@@ -138,23 +139,6 @@ class StandardsTests(unittest.TestCase):
         path.write_text(json.dumps(data))
         with self.assertRaisesRegex(StandardsError, 'only'):
             load_catalog(self.folder)
-
-    def test_stackup_documents_reject_redundant_summaries(self):
-        path = self.folder / 'stackups/two_layer.json'
-        original = path.read_bytes()
-        for field, value in [('board_thickness_mm', 1.8), ('copper_layer_count', 4), ('copper', [])]:
-            with self.subTest(field=field):
-                data = json.loads(original)
-                data[field] = value
-                path.write_text(json.dumps(data))
-                with self.assertRaises(StandardsError):
-                    load_catalog(self.folder)
-                path.write_bytes(original)
-
-    def test_multiple_dielectric_sublayers_are_counted(self):
-        path = self.folder / 'stackups/two_layer.json'
-        path.write_text(path.read_text().replace('(thickness 1.53)', '(thickness 0.53) addsublayer (thickness 1.0)'))
-        self.assertEqual(len(load_catalog(self.folder).stackups), 1)
 
     def test_bad_and_newer_board_formats_rejected(self):
         catalog = load_catalog(self.folder)

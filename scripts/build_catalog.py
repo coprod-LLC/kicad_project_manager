@@ -1,4 +1,4 @@
-"""Publish a PCM feed, retaining all versions available in GitHub Releases."""
+"""Publish a PCM feed, retaining releases of the current package identity."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ import re
 import time
 import urllib.request
 
-from scripts.build_release import json_bytes, sha256
-
-IDENTIFIER = "com.github.coprod-llc.kicad-project-manager"
+from project_manager import IDENTIFIER, NAME
+from scripts.build_release import json_bytes, repository_name, sha256
 
 
 def merge_packages(packages: list[dict]) -> dict:
@@ -76,7 +75,7 @@ def write_catalog(package: dict, destination: Path, base_url: str, timestamp: in
     (destination / "packages.json").write_bytes(data)
     repository = {
         "$schema": "https://go.kicad.org/pcm/schemas/v1#/definitions/Repository",
-        "name": "coprod KiCad plugins",
+        "name": NAME,
         "maintainer": package["author"],
         "packages": {
             "url": base_url.rstrip("/") + "/packages.json",
@@ -86,16 +85,17 @@ def write_catalog(package: dict, destination: Path, base_url: str, timestamp: in
     (destination / "repository.json").write_bytes(json_bytes(repository))
     feed_url = html.escape(base_url.rstrip("/") + "/repository.json")
     version = html.escape(package["versions"][0]["version"])
+    homepage = html.escape(package["resources"]["homepage"], quote=True)
     (destination / "index.html").write_text(
         '<!doctype html><html lang="en"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>KiCad Project Manager</title><body style="font:18px system-ui;max-width:780px;margin:4em auto;padding:1em">'
         '<h1>KiCad Project Manager</h1>'
-        '<p>A project companion for KiCad 9. Review template updates, edit KiBot metadata, select project status, and apply company rules and stackup.</p>'
+        '<p>A project companion for KiCad 9. Review template updates, edit KiBot metadata, and apply reusable rules and stackups.</p>'
         f'<p>Latest packaged version: <strong>{version}</strong> (testing).</p>'
         '<p>In KiCad’s Plugin and Content Manager, choose Manage and add this repository URL:</p>'
         f'<p><a href="{feed_url}">{feed_url}</a></p>'
-        '<p><a href="https://github.com/coprod-LLC/kicad_project_manager">Documentation and source</a></p>'
+        f'<p><a href="{homepage}">Documentation and source</a></p>'
         '</body></html>\n', encoding="utf-8",
     )
 
@@ -104,11 +104,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--releases", type=Path, required=True)
     parser.add_argument("--current", type=Path, required=True)
-    parser.add_argument("--repository", default="coprod-LLC/kicad_project_manager")
+    parser.add_argument("--repository", default=repository_name())
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--output", type=Path, default=Path("site"))
     args = parser.parse_args()
-    packages = released_packages(json.loads(args.releases.read_text()), args.repository)
+    # Packages under a previous identity remain immutable release downloads;
+    # KiCad requires reinstalling when switching to the new generic identity.
+    packages = [package for package in released_packages(json.loads(args.releases.read_text()), args.repository)
+                if package["identifier"] == IDENTIFIER]
     packages.append(json.loads(args.current.read_text()))
     package = merge_packages(packages)
     write_catalog(package, args.output, args.base_url, int(time.time()))

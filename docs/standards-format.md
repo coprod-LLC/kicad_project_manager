@@ -1,6 +1,6 @@
 # Standards catalog format
 
-Project Manager v0.6.0 requires catalog schema 2 for KiCad 9. The loader rejects
+The plugin requires catalog schema 2 for KiCad 9. The loader rejects
 catalog schema 1. Select the folder containing `catalog.json` in Overview.
 
 ```json
@@ -33,7 +33,6 @@ the catalog version. For example, `stackups/example/ex0216.json`:
   "kicad_major": 9,
   "id": "example_ex0216",
   "name": "Example two-layer construction",
-  "status": "draft",
   "manufacturer": "Example",
   "manufacturer_stackup_id": "EX0216",
   "nominal_thickness_mm": 1.6,
@@ -59,7 +58,7 @@ and physical total including masks. Do not store `copper_layer_count`, `copper`,
 document; those duplicated summaries and file references are rejected.
 
 IDs must match `[a-z0-9][a-z0-9_-]{0,79}` and be unique among stackups. Names are
-required. Status is `draft` (the default), `reviewed` or `deprecated`. Copper
+required. Stackup documents have no review status; a `status` field is rejected. Copper
 layers must have positive thickness and be ordered F.Cu, consecutive InN.Cu,
 B.Cu, with an even count from 2 through 32. Aliases and copper roles belong to
 each project and are preserved on apply.
@@ -71,10 +70,12 @@ each project and are preserved on apply.
 - Order specifications: `nominal_thickness_mm`, `outer_copper_oz`,
   `inner_copper_oz`, `finished_thickness_mm`, `thickness_tolerance_percent`,
   `manufacturer_compression_thickness_mm`. These are separate from the KiCad sum.
-- Review: `manufacturer_recommended` (true/false/null), `recommendation_checked`,
+- Manufacturer preference: `manufacturer_recommended` (true/false/null), `recommendation_checked`,
   `recommendation_evidence`, `manufacturer_geometry_checked` and `preferred`.
-  Dates use YYYY-MM-DD; internal preference and manufacturer recommendation are
-  independent.
+  Dates use YYYY-MM-DD; internal preference and manufacturer preference are
+  independent. The UI calls the boolean field **Manufacturer’s preferred option**:
+  Yes / No / Unknown. No means an alternative option, not discouraged; the stored
+  key remains generic and consistent with the existing constructions.
 - Context: `description`, `notes`, `used_in` and `assumptions` (the last two are
   arrays of single-line strings).
 - `impedance_targets`: an array with `mode` (`single_ended` or `differential`),
@@ -94,3 +95,22 @@ expanded native stackup/copper hashes in the project's `kpm-standards.json`.
 This includes metadata and source evidence in provenance. Appearance overrides
 retain the original source hashes and separately record the applied hashes.
 Deleting a catalog file does not modify projects that already used it.
+
+## Save as preset
+
+The Stackup tab captures native text from the saved KiCad 9 board and creates a
+document in exactly this format. Metadata and optional impedance guides are
+validated before saving. No review-status field, local board path, project rules
+or enabled-layer aliases are copied into the document.
+
+Duplicate detection compares manufacturer/code and complete ordered copper and
+dielectric properties. Mask colour, silkscreen, finish and editor locks do not
+create a distinct construction. Similarity review also shows constructions with
+matching ply types and thickness differences up to 10% or 0.005 mm per ply,
+whichever is larger. Material, dielectric-constant and loss-tangent differences
+are disclosed. Identical constructions from another manufacturer need explicit
+review rather than being merged automatically.
+
+The writer checks source-board and catalog changes again, then atomically creates
+a single file without replacing an existing destination. The catalog is refreshed
+and the new preset selected. Saving performs no board writes or Git operations.

@@ -1,14 +1,15 @@
-KiCad Project Manager v0.6.0 migrates standards to self-contained stackup files.
+KiCad Project Manager v0.7.0
 
-- Require catalog schema 2 and discover stackups recursively under `stackups/`.
-- Keep metadata, native physical stackup, manufacturer evidence and impedance guidance in one JSON file per preset.
-- Derive copper declarations and thickness summaries on load. Adding or deleting a preset changes one file, followed by Refresh.
-- Record the complete preset document hash on apply, including metadata. Preserve existing preset IDs, project settings, appearance overrides and backups.
-- Reject the old catalog format and duplicated stackup summaries. A committed checksum manifest is no longer required.
+- Review template files in batches with Shift/Ctrl selection and partial apply.
+- Apply directly beside Preview Apply and continue in the open review window.
+- Store each stackup preset in one self-contained JSON file under catalog schema 2.
+- Save an unmatched saved-board construction as a preset, with metadata,
+  impedance guides and duplicate/similarity checks.
+- Use a compact README with native screenshots and linked operating/developer guides.
+- Use neutral public wording and the runtime-valid package ID
+  `org.kicadprojectmanager.plugin`. Validate the extra KiCad 9 identifier constraint
+  during development installation, packaging and schema checks.
 
-The Save as preset workflow is planned separately.
-
-Validation covers 125 unit tests, native GUI flows at narrow and wide sizes,
-official KiCad package schemas, and native KiCad load/save checks of the migrated
-constructions. Save the project and close the PCB and schematic editors before
-applying standards, then reopen the project.
+Uninstall a PCM copy with the previous identity before installing this package.
+Existing project data, settings and backups keep their current locations.
+Save and close PCB/schematic editors before applying standards; reopen afterward.

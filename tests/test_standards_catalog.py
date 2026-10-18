@@ -34,15 +34,6 @@ class CatalogDocumentsTests(unittest.TestCase):
         self.assertEqual([p.id for p in load_catalog(self.root).stackups], ['two_layer'])
         self.assertEqual(original, self.snapshot())
 
-    def test_copper_summaries_and_neutral_declarations_are_derived(self):
-        preset = load_catalog(self.root).stackups[0]
-        self.assertEqual(preset.details['copper_layer_count'], 2)
-        self.assertAlmostEqual(preset.details['board_thickness_mm'], 1.6)
-        self.assertEqual(preset.details['copper'], [{'layer': 'F.Cu', 'thickness_mm': 0.035},
-                                                   {'layer': 'B.Cu', 'thickness_mm': 0.035}])
-        self.assertEqual(preset.files['copper_layers_file'], '(layers\n  (0 "F.Cu" signal)\n  (2 "B.Cu" signal)\n)\n')
-        self.assertNotIn('stackup', preset.details)
-
     def test_applied_provenance_hashes_document_metadata_and_survives_preset_deletion(self):
         project, board = saved_board(self.base / 'project')
         store = self.base / 'settings'
@@ -67,13 +58,11 @@ class CatalogDocumentsTests(unittest.TestCase):
         self.document.unlink()
         snapshot = {p: p.read_bytes() for p in project.parent.iterdir() if p.is_file()}
         self.assertEqual(load_catalog(self.root).stackups, ())
+        self.document.parent.rmdir()
+        self.assertEqual(load_catalog(self.root).stackups, ())
+        self.assertEqual(len(load_catalog(self.root).rules), 1)
         self.assertEqual(snapshot, {p: p.read_bytes() for p in snapshot})
         self.assertEqual(board_bytes, board.read_bytes())
-
-    def test_empty_stackup_directory_can_be_removed_from_a_rules_catalog(self):
-        self.document.unlink()
-        self.document.parent.rmdir()
-        self.assertEqual(len(load_catalog(self.root).rules), 1)
 
     def test_duplicate_ids_in_different_files_are_rejected(self):
         write_stackup(self.root / 'stackups/another/copy.json', 'two_layer', 'Copy', STACKUP)
@@ -93,7 +82,8 @@ class CatalogDocumentsTests(unittest.TestCase):
                         {'kicad_major': True}, {'stackup': ''}, {'stackup': []}, {'stackup': [None]},
                         {'stackup': ['(stackup\n)']}, {'source_evidence': []},
                         {'stackup_file': '../outside'}, {'copper_layers_file': 'layers.sexpr'},
-                        {'preset_file': 'other.json'}):
+                        {'preset_file': 'other.json'}, {'status': 'draft'},
+                        {'board_thickness_mm': 1.8}, {'copper_layer_count': 4}, {'copper': []}):
             with self.subTest(updates=updates):
                 self.document.write_text(json.dumps({**original, **updates}))
                 with self.assertRaisesRegex(StandardsError, 'stackups/two_layer.json'):

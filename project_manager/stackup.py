@@ -207,7 +207,11 @@ def validate_metadata(entry: dict) -> None:
     for key in ('recommendation_checked', 'manufacturer_geometry_checked'):
         if entry.get(key) is not None:
             value = _string(entry[key], key)
-            if date.fromisoformat(value).isoformat() != value:
+            try:
+                valid = date.fromisoformat(value).isoformat() == value
+            except ValueError:
+                valid = False
+            if not valid:
                 raise StandardsError(f'{key} must use YYYY-MM-DD.')
     if entry.get('source_url') is not None:
         value = urlparse(_string(entry['source_url'], 'Source URL'))
@@ -235,26 +239,20 @@ def stackup_label(entry: dict) -> str:
     manufacturer = entry.get('manufacturer')
     if not manufacturer:
         return entry['name']
-    parts = [manufacturer, entry.get('manufacturer_stackup_id') or 'code pending',
-             f'{entry["copper_layer_count"]} layers']
-    thickness = entry.get('nominal_thickness_mm')
-    parts.append(f'{thickness:g} mm nominal' if thickness else f'{entry["board_thickness_mm"]:g} mm stackup')
-    if entry.get('outer_copper_oz') and entry.get('inner_copper_oz'):
-        parts.append(f'{entry["outer_copper_oz"]:g} oz outer / {entry["inner_copper_oz"]:g} oz inner')
-    else:
-        copper = entry['copper']
-        parts.append(f'{copper[0]["thickness_mm"] * 1000:g} µm outer' +
-                     (f' / {copper[1]["thickness_mm"] * 1000:g} µm inner' if len(copper) > 2 else ''))
-    return ' · '.join(parts)
+    code = entry.get('manufacturer_stackup_id')
+    name = entry['name']
+    if manufacturer.casefold() in name.casefold() and (not code or code.casefold() in name.casefold()):
+        return name
+    return ' · '.join(part for part in (manufacturer, code, name) if part)
 
 
 def recommendation_text(entry: dict) -> str:
     recommended = entry.get('manufacturer_recommended')
-    text = 'Manufacturer recommendation: ' + ('unknown' if recommended is None else 'yes' if recommended else 'no')
+    text = 'Manufacturer’s preferred option: ' + ('unknown' if recommended is None else 'yes' if recommended else 'no (alternative)')
     if entry.get('recommendation_checked'):
         text += ' (checked ' + entry['recommendation_checked'] + ')'
     if entry.get('preferred'):
-        text += ' · Coprod preferred'
+        text += ' · Internally preferred'
     return text
 
 

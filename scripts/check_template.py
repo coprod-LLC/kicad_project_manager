@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from project_manager.setup import CONFIG, apply, prepare, read_setup
+from project_manager.setup import apply, prepare, read_setup
 
 EXPECTED = {
     'PROJECT_NAME': 'Example controller', 'BOARD_NAME': 'Control board',

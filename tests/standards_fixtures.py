@@ -34,7 +34,7 @@ def catalog_folder(root: Path) -> Path:
 def write_stackup(path: Path, pid: str, name: str, native: str, **metadata) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {'schema_version': 1, 'kicad_major': 9, 'id': pid, 'name': name,
-            'status': 'draft', **metadata, 'stackup': native.splitlines()}
+            **metadata, 'stackup': native.splitlines()}
     path.write_text(json.dumps(data, indent=2), encoding='utf-8')
     return path
 

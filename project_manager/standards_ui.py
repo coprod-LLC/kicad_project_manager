@@ -16,6 +16,8 @@ from .standards_apply import EditorsOpenError, apply_standards, plan_standards
 from .stackup import (parse_stackup, read_board_stackup, appearance_override, recommendation_text,
                       matching_stackups, stackup_identity)
 from .stackup_ui import StackupView
+from .stackup_save import capture_saved_stackup
+from .stackup_save_ui import SaveStackupDialog
 from .template_ui import MATCH_COLOUR, MODIFIED_COLOUR, MISSING_COLOUR
 
 
@@ -127,6 +129,10 @@ class StandardsPanel(wx.ScrolledWindow):
         row.Add(self.stackup_arrow, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10)
         row.Add(self.selected_stackup, 1, wx.EXPAND)
         layout.Add(row, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
+        self.capture_button = wx.Button(self.current_stackup, label='Save as preset…')
+        self.capture_button.SetToolTip('Read the last saved board stackup and add a single preset file to the catalog. The editor can stay open.')
+        self.capture_button.Bind(wx.EVT_BUTTON, self._save_as_preset)
+        self.current_stackup.actions.Add(self.capture_button, 0, wx.EXPAND | wx.TOP, 6)
         appearance = self.appearance = wx.Panel(self)
         box = wx.BoxSizer(wx.HORIZONTAL)
         self.overrides = {}
@@ -239,6 +245,14 @@ class StandardsPanel(wx.ScrolledWindow):
         if self.kind == 'stackups':
             for choice in self.overrides.values():
                 choice.Enable(not self._busy)
+            can_capture = bool(self.catalog and self.context and self.context.board_saved
+                               and self.snapshot and self.snapshot.physical
+                               and not matching_stackups(self.snapshot.physical, self.catalog.stackups))
+            self.capture_button.Enable(can_capture and not self._busy and not self._catalog_busy and not self._snapshot_busy)
+            if self.capture_button.Show(can_capture):
+                self.current_stackup.Layout()
+                self.Layout()
+                self.FitInside()
         ready = self.context is not None and self.context.project_saved and self.context.board_saved
         chosen = any(self.selected(kind) for kind in self.choices)
         self.preset_button.Enable(bool(chosen and not self._busy))
@@ -345,8 +359,6 @@ class StandardsPanel(wx.ScrolledWindow):
         self._fill_rule_values()
         self._draw_stackups()
         self._controls()
-        if self.kind == 'stackups' and (preset := self.selected('stackups')) and preset.status == 'draft':
-            self._show_result('Draft preset: review its physical properties before fabrication.', state='warning')
         if self.kind == 'rules' and self.context and self.context.project_saved and self.context.board_saved and self.selected('rules'):
             wx.CallAfter(self._compare, None)
 
@@ -388,8 +400,9 @@ class StandardsPanel(wx.ScrolledWindow):
             for kind, choice in self.choices.items():
                 entries = getattr(catalog, kind)
                 choice.Set(['Keep current settings'] + [f'{p.name}'
-                           + (' · recommended' if kind == 'stackups' and p.details.get('manufacturer_recommended') else '')
-                           + (' · preferred' if p.details.get('preferred') else '') + f' [{p.status}]' for p in entries])
+                           + (' · manufacturer preferred' if kind == 'stackups' and p.details.get('manufacturer_recommended') else '')
+                           + (' · preferred' if p.details.get('preferred') else '')
+                           + (f' [{p.status}]' if p.status else '') for p in entries])
                 choice.SetSelection(next((i + 1 for i, p in enumerate(entries) if p.id == selected[kind]), 0))
         self._selection_changed()
         if not catalog:
@@ -400,6 +413,51 @@ class StandardsPanel(wx.ScrolledWindow):
         if self.on_catalog:
             self.on_catalog(catalog, error)
         self.Layout()
+
+    def _save_as_preset(self, _event):
+        if not self.capture_button.IsShown() or not self.capture_button.IsEnabled():
+            return
+        self._generation += 1
+        generation = self._generation
+        board, root = Path(self.context.board_file), self.catalog.root
+        self._busy = True
+        self._controls()
+        self._show_result('Reading the saved stackup and checking the catalog…')
+        def worker():
+            capture, catalog, error = None, None, ''
+            try:
+                capture = capture_saved_stackup(board)
+                catalog = load_catalog(root)
+            except (ValueError, OSError) as exc:
+                error = str(exc)
+            except Exception:
+                error = 'Could not read the saved stackup. Save the board and try again.'
+            wx.CallAfter(self._finish_capture, generation, capture, catalog, error)
+        threading.Thread(target=worker, daemon=True, name='stackup-capture').start()
+
+    def _finish_capture(self, generation, capture, catalog, error):
+        if self._closed or generation != self._generation:
+            return
+        if error:
+            self._busy = False
+            self._controls()
+            self._show_result(error, state='error')
+            return
+        try:
+            with SaveStackupDialog(self, capture, catalog) as dialog:
+                result = dialog.ShowModal()
+                selected_id = dialog.selected_id
+                saved_catalog = dialog.saved_catalog
+        finally:
+            self._busy = False
+            self._controls()
+        if result in (wx.ID_OK, wx.ID_APPLY):
+            self._finish_catalog(self._catalog_generation, saved_catalog or catalog, None, {'stackups': selected_id})
+            self.set_context(self.context)
+            self._show_result('Preset saved to the catalog.' if result == wx.ID_OK else 'Existing preset selected.',
+                              state='success')
+        else:
+            self._show_result('')
 
     def _compare(self, event):
         context = self.context

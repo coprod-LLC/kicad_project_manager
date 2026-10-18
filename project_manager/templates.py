@@ -489,19 +489,25 @@ class Upgrade:
 
 
 def prepare_upgrade(comparison: Comparison, choices: dict[str, str], edits: dict[str, bytes] | None = None) -> Upgrade:
-    """Explicit review acknowledges preserved document edits as the new baseline.
+    """Apply decided files, preserving the baselines of deferred files.
 
+    Omitted files and 'review' actions remain unchanged and unacknowledged.
+    Explicit review acknowledges preserved document edits as the new baseline.
     Company-file exceptions remain visible as local modifications after apply.
     """
-    if set(choices) != {item.path for item in comparison.items}:
-        raise SetupError('Review every managed file before applying the template.')
+    if set(choices) - {item.path for item in comparison.items}:
+        raise SetupError('Unknown file in template review.')
     if comparison.version and version_tuple(comparison.version) > version_tuple(comparison.template.version):
         raise SetupError('Choose a template at least as new as the project; downgrades are not supported.')
+    if not any(choice != 'review' for choice in choices.values()):
+        return Upgrade(comparison, ())
     changes, files = [], {}
     for item in comparison.items:
-        choice = choices[item.path]
+        choice = choices.get(item.path, 'review')
         if choice == 'review':
-            raise SetupError(f'Choose whether to keep, replace, or merge this file: {item.path}')
+            if item.base is not None:
+                files[item.path] = item.base
+            continue
         if choice not in ('keep', 'use', 'edit'):
             raise SetupError('Unknown template review action.')
         if item.current is None and choice == 'keep':

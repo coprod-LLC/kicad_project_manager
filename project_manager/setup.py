@@ -73,7 +73,8 @@ def read_setup(root: Path) -> Snapshot:
     root = root.resolve(strict=True)
     config = read_file(root, CONFIG)
     if config is None:
-        raise SetupError(f'Missing {CONFIG}. Start with a Coprod or KDT KiBot template project.')
+        raise SetupError(f'Missing {CONFIG}. Choose a compatible versioned KiBot template in Overview '
+                         'and use template review to add the configuration.')
     if not re.search(rb'^\.\.\.\r?$', config, re.M):
         raise SetupError('KiBot configuration has no separate definitions document.')
     fields = metadata_block(config).values

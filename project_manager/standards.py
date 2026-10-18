@@ -213,6 +213,8 @@ def _stackup_documents(root: Path) -> list[tuple[dict, str, str]]:
 
 def _embedded_stackup(entry: dict, source: tuple[str, str]) -> tuple[dict, dict]:
     text, relative = source
+    if 'status' in entry:
+        raise StandardsError('Stackup presets have no review status; remove status from this document.')
     if type(entry.get('schema_version')) is not int or entry['schema_version'] != 1:
         raise StandardsError('Stackup documents must use schema_version 1.')
     if type(entry.get('kicad_major')) is not int or entry['kicad_major'] != 9:
@@ -261,8 +263,8 @@ def load_catalog(folder: Path) -> Catalog:
                     raise StandardsError('Preset IDs must be unique lowercase names within each category.')
                 seen.add(pid)
                 title = _string(entry.get('name'), 'Preset name')
-                status = entry.get('status', 'draft')
-                if status not in ('draft', 'reviewed', 'deprecated'):
+                status = entry.get('status', 'draft') if kind == 'rules' else ''
+                if kind == 'rules' and status not in ('draft', 'reviewed', 'deprecated'):
                     raise StandardsError('Preset status must be draft, reviewed, or deprecated.')
                 if kind == 'stackups':
                     try:
@@ -309,7 +311,7 @@ def preset_details(preset: Preset | None) -> str:
     if preset is None:
         return 'Keep the current project settings for this category.'
     data = preset.details
-    lines = [f'{preset.name} ({preset.status})']
+    lines = [preset.name + (f' ({preset.status})' if preset.status else '')]
     if preset.kind == 'stackups':
         from .stackup import parse_stackup, physical_summary, recommendation_text
         lines += [physical_summary(parse_stackup(preset.files['stackup_file'])), recommendation_text(data)]

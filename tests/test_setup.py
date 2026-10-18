@@ -1,7 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
-import os
 import unittest
 from unittest.mock import patch
 

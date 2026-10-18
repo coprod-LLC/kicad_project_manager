@@ -45,6 +45,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y python3-wxgtk4.0 xvfb
       - name: Exercise the window and capture it
         run: xvfb-run -a /usr/bin/python3 -u -m scripts.smoke_gui --output .dev/gui.png
+      - name: Exercise Save as preset
+        run: xvfb-run -a /usr/bin/python3 -u -m scripts.smoke_stackup_save --output .dev/save-preset
       - uses: actions/upload-artifact@v4
         with:
           name: gui-preview

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from project_manager.preferences import save_template
 from project_manager.setup import CONFIG, METADATA, WORKFLOW, read_setup, prepare, apply
 from project_manager.templates import (MANIFEST, STATE, DOCUMENTS, apply_upgrade, build_manifest,
-                                       canonical, compare, load_template, policy, prepare_upgrade,
+                                       compare, load_template, policy, prepare_upgrade,
                                        resolve_template, version_tuple)
 from project_manager.yaml_fields import ScalarBlock, SetupError
 from tests.fixtures import sample_project
@@ -168,12 +168,98 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(project_document.read_text(), 'My project documentation\n')
         self.assertFalse(self.inspect().problems)
 
-    def test_document_conflict_requires_an_explicit_decision(self):
+    def test_undecided_document_is_left_unchanged_and_unacknowledged(self):
         path = sorted(DOCUMENTS)[0]
         (self.project / path).write_text('Custom project note\n')
         comparison = self.inspect()
-        with self.assertRaisesRegex(SetupError, 'Choose whether to keep'):
-            prepare_upgrade(comparison, {i.path: i.suggested for i in comparison.items})
+        plan = prepare_upgrade(comparison, {i.path: i.suggested for i in comparison.items})
+        self.assertNotIn(path, {change.relative for change in plan.changes})
+        apply_upgrade(plan, self.storage)
+        self.assertEqual((self.project / path).read_text(), 'Custom project note\n')
+        self.assertNotIn(path, json.loads((self.project / STATE).read_text())['files'])
+        item = next(item for item in self.inspect().items if item.path == path)
+        self.assertEqual(item.suggested, 'review')
+        self.assertIsNone(item.base)
+
+    def test_partial_upgrade_preserves_deferred_document_baselines_and_can_resume(self):
+        self.adopt()
+        old_baselines = json.loads((self.project / STATE).read_text())['files']
+        documents = sorted(DOCUMENTS)[:2]
+        for path in documents:
+            (self.project / path).write_text('Custom project note\n')
+            (self.template.root / path).write_text('New company guidance\n')
+        script = 'kibot_resources/scripts/helper.py'
+        (self.template.root / script).write_text('print("new template")\n')
+        self.template = release(self.template.root, '1.1.0')
+        # Both explicit "Choose action" and omitted choices defer the file.
+        plan = prepare_upgrade(self.inspect(), {script: 'use', documents[0]: 'review'})
+        self.assertEqual({change.relative for change in plan.changes}, {script, MANIFEST, STATE})
+        apply_upgrade(plan, self.storage)
+        baselines = json.loads((self.project / STATE).read_text())['files']
+        for path in documents:
+            self.assertEqual((self.project / path).read_text(), 'Custom project note\n')
+            self.assertEqual(baselines[path], old_baselines[path])
+            item = next(item for item in self.inspect().items if item.path == path)
+            self.assertEqual(item.suggested, 'review')
+            self.assertEqual(item.base['content'], old_baselines[path]['content'])
+        self.assertEqual((self.project / script).read_text(), 'print("new template")\n')
+        self.assertEqual(self.inspect().colour, 'amber')
+        self.adopt()  # Later explicit keep decisions accept only these document baselines.
+        self.assertFalse(self.inspect().problems)
+        self.assertFalse(self.adopt().changes)
+
+    def test_partial_upgrade_defers_missing_and_unchanged_shared_files(self):
+        self.adopt()
+        missing = 'kibot_resources/fonts/font.ttf'
+        script = 'kibot_resources/scripts/helper.py'
+        document = sorted(DOCUMENTS)[0]
+        (self.project / missing).unlink()
+        original_script = (self.project / script).read_bytes()
+        (self.template.root / script).write_text('New shared automation\n')
+        (self.template.root / document).write_text('New company guidance\n')
+        self.template = release(self.template.root, '1.1.0')
+        apply_upgrade(prepare_upgrade(self.inspect(), {document: 'use'}), self.storage)
+        self.assertFalse((self.project / missing).exists())
+        self.assertEqual((self.project / script).read_bytes(), original_script)
+        self.assertEqual((self.project / document).read_text(), 'New company guidance\n')
+        items = {item.path: item for item in self.inspect().items}
+        self.assertEqual(items[missing].status, 'Missing required file')
+        self.assertEqual(items[script].status, 'Template changed; project unchanged')
+        self.assertEqual(items[script].suggested, 'use')
+        self.adopt()
+        self.assertFalse(self.inspect().problems)
+
+    def test_no_decisions_produce_no_writes_or_provenance_changes(self):
+        comparison = self.inspect()
+        for choices in ({}, {item.path: 'review' for item in comparison.items}):
+            plan = prepare_upgrade(comparison, choices)
+            self.assertFalse(plan.changes)
+            self.assertIsNone(apply_upgrade(plan, self.storage))
+        self.assertFalse((self.project / STATE).exists())
+        self.assertEqual((self.project / MANIFEST).read_bytes(), comparison.manifest_before)
+
+    def test_successive_partial_decisions_keep_baseline_order_stable(self):
+        script = 'kibot_resources/scripts/helper.py'
+        apply_upgrade(prepare_upgrade(self.inspect(), {script: 'keep'}), self.storage)
+        choices = {WORKFLOW: 'keep', script: 'keep'}
+        apply_upgrade(prepare_upgrade(self.inspect(), choices), self.storage)
+        state = (self.project / STATE).read_bytes()
+        plan = prepare_upgrade(self.inspect(), choices)
+        self.assertFalse(plan.changes)
+        self.assertIsNone(apply_upgrade(plan, self.storage))
+        self.assertEqual((self.project / STATE).read_bytes(), state)
+
+    def test_partial_review_still_validates_actions_and_paths(self):
+        comparison = self.inspect()
+        with self.assertRaisesRegex(SetupError, 'Unknown file'):
+            prepare_upgrade(comparison, {'kibot_yaml/unknown.yaml': 'use'})
+        with self.assertRaisesRegex(SetupError, 'Unknown template review action'):
+            prepare_upgrade(comparison, {CONFIG: 'unknown'})
+        with self.assertRaisesRegex(SetupError, 'Only project documentation'):
+            prepare_upgrade(comparison, {CONFIG: 'edit'}, {CONFIG: b'not allowed'})
+        (self.project / WORKFLOW).unlink()
+        with self.assertRaisesRegex(SetupError, 'cannot be left missing'):
+            prepare_upgrade(self.inspect(), {WORKFLOW: 'keep'})
 
     def test_manual_document_merge(self):
         path = sorted(DOCUMENTS)[0]
@@ -336,14 +422,14 @@ class TemplateTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, 'different template'):
             self.inspect()
 
-    def test_downgrades_and_unreviewed_files_are_rejected(self):
+    def test_downgrades_are_rejected_even_with_no_decisions(self):
         self.adopt()
         self.template = release(self.template.root, '0.9.0')
         comparison = self.inspect()
         self.assertIn('Installed template is older', comparison.summary)
         with self.assertRaisesRegex(SetupError, 'downgrades'):
             prepare_upgrade(comparison, {i.path: i.suggested for i in comparison.items})
-        with self.assertRaisesRegex(SetupError, 'Review every'):
+        with self.assertRaisesRegex(SetupError, 'downgrades'):
             prepare_upgrade(comparison, {})
         self.assertGreater(version_tuple('1.10.0'), version_tuple('1.9.9'))
 

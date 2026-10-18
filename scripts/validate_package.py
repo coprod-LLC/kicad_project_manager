@@ -9,12 +9,16 @@ import zipfile
 
 import jsonschema
 
+from scripts.build_release import validate_plugin_identifier
+
 
 def validate(schema: dict, document: dict, definition: str | None = None) -> None:
     schema = dict(schema)
     if definition:
         schema["$ref"] = "#/definitions/" + definition
     jsonschema.Draft7Validator(schema).validate(document)
+    if 'identifier' in document:
+        validate_plugin_identifier(document['identifier'])
 
 
 def main() -> None:

@@ -2,10 +2,10 @@
   "$schema": "https://go.kicad.org/pcm/schemas/v1",
   "name": "KiCad Project Manager",
   "description": "Review template updates, edit KiBot metadata, and inspect and apply reusable rules and stackups.",
-  "description_full": "A native wxPython IPC companion for KiCad 9. Check project automation against a versioned local template, with colored file results and reviewed upgrades. Preserve metadata, workflow status, release-history variables and project documentation; add missing files through the same review. Edit metadata, authors, and an optional reviewer, and select DRAFT/PRELIMINARY/CHECKED. Browse Design Rules and Stackup in separate tabs using a shared local standards catalog. Compare current and selected physical stackups visually, including every dielectric ply and surface layer; identify saved constructions by manufacturer and code. Override mask, silkscreen and finish defaults. Company design rules stay in one marked block, and project exceptions and schematic net assignments are kept. Close the PCB and schematic editors before applying standards. Changes use local backups and conflict detection. Enable the KiCad API in Preferences → Plugins. Linux requires Python pip, venv, and distro-provided wxPython.",
-  "identifier": "com.github.coprod-llc.kicad-project-manager",
+  "description_full": "A native KiCad 9 companion for versioned KiBot templates and reusable standards. Review template files with bulk selection and partial apply, edit project metadata and workflow status, compare design rules and physical stackups, and save a board construction as a reusable preset. Changes use local backups and conflict detection. Enable the KiCad API in Preferences → Plugins. Linux requires Python pip, venv and distro-provided wxPython. Save and close PCB and schematic editors before applying standards.",
+  "identifier": "org.kicadprojectmanager.plugin",
   "type": "plugin",
-  "author": {"name": "coprod LLC", "contact": {"web": "https://github.com/coprod-LLC/kicad_project_manager"}},
+  "author": {"name": "KiCad Project Manager contributors", "contact": {"web": "https://github.com/coprod-LLC/kicad_project_manager"}},
   "license": "MIT",
   "resources": {
     "homepage": "https://github.com/coprod-LLC/kicad_project_manager",

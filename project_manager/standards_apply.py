@@ -605,7 +605,7 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
         board_change = _change(root, board_path, board_bytes, merged_board, board_bom)
         if board_change:
             changes.append(board_change)
-    if (rules is not None and rules.status == 'draft') or (stackup is not None and stackup.status == 'draft'):
+    if rules is not None and rules.status == 'draft':
         summary.append('A selected preset is still a draft. Review it before building a board from it.')
     provenance = _merge_provenance(provenance_text, rules, stackup, catalog_name, commit, dirty)
     provenance_change = _change(root, provenance_path, provenance_bytes, provenance, provenance_bom)

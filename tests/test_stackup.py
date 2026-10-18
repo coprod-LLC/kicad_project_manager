@@ -8,6 +8,7 @@ from project_manager.stackup import (appearance_override, matching_stackups, par
                                     read_board_stackup, stackup_identity)
 from project_manager.standards import StandardsError, load_catalog
 from project_manager.standards_apply import apply_standards, plan_standards
+from project_manager.sexpr import atoms, forms
 from tests.standards_fixtures import detailed_catalog, saved_board
 
 
@@ -61,6 +62,10 @@ class StackupTests(unittest.TestCase):
         self.assertAlmostEqual(actual.board_thickness_mm, actual.physical.total_mm)
         self.assertIn('(0 "F.Cu" power "Supply")', self.board.read_text())
         self.assertEqual(self.project.read_bytes(), original_project)
+        layers = next(node for name, node in forms(self.board.read_text(), children=True) if name == 'layers')
+        copper = [atoms(node)[:2] for _name, node in forms(layers, children=True) if atoms(node)[1].endswith('.Cu')]
+        self.assertEqual(copper, [['0', 'F.Cu'], ['4', 'In1.Cu'], ['6', 'In2.Cu'],
+                                  ['8', 'In3.Cu'], ['10', 'In4.Cu'], ['2', 'B.Cu']])
         self.assertFalse(plan_standards(self.project, self.board, None, self.preset).changes)
 
     def test_retained_masks_are_included_in_applied_thickness(self):
@@ -89,7 +94,7 @@ class StackupTests(unittest.TestCase):
         self.assertEqual(provenance['stackup']['applied_file_hashes']['stackup_file'],
                          hashlib.sha256(selected.files['stackup_file'].encode()).hexdigest())
 
-    def test_metadata_is_validated_and_guidance_does_not_assign_nets(self):
+    def test_invalid_manufacturer_and_impedance_metadata_are_rejected(self):
         path = self.folder / self.preset.details['preset_file']
         original = path.read_text()
         for update in [{'manufacturer_recommended': 'yes'}, {'outer_copper_oz': -1},

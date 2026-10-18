@@ -13,13 +13,17 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = (
     "plugin.json", "requirements.txt", "run_project_manager.py", "LICENSE", "README.md",
-    "docs/standards-format.md",
+    "docs/usage.md", "docs/development.md", "docs/standards-format.md",
+    "docs/screenshots/overview.png", "docs/screenshots/project-setup.png",
+    "docs/screenshots/design-rules.png", "docs/screenshots/stackup.png",
+    "docs/screenshots/template-review.png",
     "project_manager/__init__.py", "project_manager/context.py", "project_manager/ui.py",
     "project_manager/yaml_fields.py", "project_manager/setup.py",
     "project_manager/preferences.py", "project_manager/setup_ui.py",
     "project_manager/settings_ui.py", "project_manager/standards.py",
     "project_manager/standards_ui.py", "project_manager/standards_apply.py",
     "project_manager/stackup.py", "project_manager/stackup_ui.py",
+    "project_manager/stackup_save.py", "project_manager/stackup_save_ui.py",
     "project_manager/sexpr.py", "project_manager/json_text.py",
     "project_manager/instance.py",
     "project_manager/templates.py", "project_manager/template_ui.py",
@@ -37,12 +41,28 @@ def source_version(root: Path = ROOT) -> str:
     raise ValueError("Missing __version__")
 
 
+def repository_name(root: Path = ROOT) -> str:
+    metadata = json.loads((root / "pcm/metadata.json").read_text(encoding="utf-8"))
+    url = metadata["resources"]["repository"]
+    prefix = "https://github.com/"
+    if not url.startswith(prefix) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url[len(prefix):]):
+        raise ValueError("Package repository must be a GitHub repository URL")
+    return url[len(prefix):]
+
+
 def json_bytes(value: object) -> bytes:
     return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def validate_plugin_identifier(identifier: str) -> None:
+    # KiCad 9 API_PLUGIN::IsValidIdentifier applies this additional check after
+    # schema validation. A schema-valid two-part ID is silently undiscoverable.
+    if not re.search(r'\w{2,}\.\w+\.\w+', identifier, flags=re.ASCII):
+        raise ValueError('KiCad IPC plugin identifiers require a reverse-DNS name with at least three parts.')
 
 
 def build(root: Path, output: Path, tag: str, repository: str) -> tuple[Path, Path]:
@@ -55,6 +75,7 @@ def build(root: Path, output: Path, tag: str, repository: str) -> tuple[Path, Pa
     manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
     if metadata["identifier"] != manifest["identifier"]:
         raise ValueError("IPC and PCM identifiers must match")
+    validate_plugin_identifier(manifest["identifier"])
     entry = {
         "version": version, "status": "testing", "runtime": "ipc",
         "kicad_version": "9.0", "kicad_version_max": "9.99",
@@ -92,7 +113,7 @@ def build(root: Path, output: Path, tag: str, repository: str) -> tuple[Path, Pa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--repository", default="coprod-LLC/kicad_project_manager")
+    parser.add_argument("--repository", default=repository_name())
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     archive, metadata = build(ROOT, args.output, args.tag, args.repository)
