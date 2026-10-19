@@ -252,11 +252,15 @@ class TemplateDetailsDialog(wx.Dialog):
         neutral = self.results.GetForegroundColour()
         self.results.AppendText(f'{comparison.summary}\n\nTemplate: {comparison.template.root}\n\n')
         for item in comparison.items:
-            self.results.SetDefaultStyle(wx.TextAttr(item_colour(item)))
+            start = self.results.GetLastPosition()
             self.results.AppendText(f'{item.status}: {item.path}\n')
-        self.results.SetDefaultStyle(wx.TextAttr(neutral))
+            # Cocoa can reset typing attributes when AppendText moves the
+            # insertion point. Style the inserted native range explicitly.
+            self.results.SetStyle(start, self.results.GetLastPosition(), wx.TextAttr(item_colour(item)))
         if comparison.extras:
+            start = self.results.GetLastPosition()
             self.results.AppendText('\nAdditional project files (preserved):\n' + '\n'.join(comparison.extras))
+            self.results.SetStyle(start, self.results.GetLastPosition(), wx.TextAttr(neutral))
         self.results.ShowPosition(0)
         layout.Add(self.results, 1, wx.EXPAND | wx.ALL, 12)
         layout.Add(self.CreateStdDialogButtonSizer(wx.OK), 0, wx.EXPAND | wx.ALL, 12)

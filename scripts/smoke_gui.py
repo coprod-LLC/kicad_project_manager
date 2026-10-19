@@ -103,12 +103,14 @@ def main() -> int:
             def inspect_details(dialog=dialog):
                 try:
                     contents = dialog.results.GetValue()
+                    capture(dialog, args.output.with_name('template-details-colours.png'))
                     for item in comparison.items:
                         offset = contents.index(f'{item.status}: {item.path}')
                         style = wx.TextAttr()
-                        assert dialog.results.GetStyle(offset, style), item.path
-                        assert style.GetTextColour() == expected[item.path], item.path
-                    capture(dialog, args.output.with_name('template-details-colours.png'))
+                        assert dialog.results.GetStyle(offset, style), f'No style at {offset}: {item.path}'
+                        actual = style.GetTextColour()
+                        assert actual == expected[item.path], (
+                            f'{item.path}: actual={actual.Get()}, expected={expected[item.path].Get()}')
                 except Exception as exc:
                     failures.append(f'Details colors: {exc}')
                 finally:

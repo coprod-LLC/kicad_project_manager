@@ -40,11 +40,24 @@ jobs:
           "$python" scripts/setup_port.py --cli "$app/MacOS/kicad-cli" --dry-run
           "$python" -m venv --system-site-packages "$RUNNER_TEMP/port-python"
           "$RUNNER_TEMP/port-python/bin/python" -m pip install -r requirements.txt -r .dev/library-manager/requirements.txt
-          "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
-          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
-          cd .dev/library-manager
+      - name: Project Manager tests with bundled Mac Python
+        run: '"$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v'
+      - name: Library Manager tests and native UI imports with bundled Mac Python
+        working-directory: .dev/library-manager
+        run: |
           "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
           "$RUNNER_TEMP/port-python/bin/python" -c 'from library_manager.ui import MainDialog, RepoSettingsDialog; from library_manager.paths import config_directory; print(config_directory())'
+      - name: Native Mac GUI regression
+        run: |
+          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
+          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_stackup_save --output .dev/mac-save-preset
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-mac-gui
+          path: |
+            .dev/*.png
+            .dev/mac-save-preset
   test:
     runs-on: ${{ matrix.os }}
     strategy:
