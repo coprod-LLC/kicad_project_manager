@@ -92,7 +92,8 @@ class ProjectManagerFrame(wx.Frame):
         grid.AddSpacer(0)
         template_box = self._template_box = wx.BoxSizer(wx.VERTICAL)
         self._template_status_text = 'Choose a template to check project files.'
-        self.template_status = wx.StaticText(box.GetStaticBox(), label=self._template_status_text)
+        self.template_status = wx.StaticText(box.GetStaticBox(), label=self._template_status_text,
+                                             style=wx.ST_NO_AUTORESIZE)
         self.template_status.SetMinSize((1, -1))
         template_box.Add(self.template_status, 0, wx.EXPAND)
         actions = wx.BoxSizer(wx.HORIZONTAL)
@@ -116,7 +117,8 @@ class ProjectManagerFrame(wx.Frame):
         standards_row.Add(change_standards)
         grid.Add(standards_row, 1, wx.EXPAND)
         grid.AddSpacer(0)
-        self.standards_status = wx.StaticText(box.GetStaticBox(), label='Choose a shared standards repository above.')
+        self.standards_status = wx.StaticText(box.GetStaticBox(), label='Choose a shared standards repository above.',
+                                              style=wx.ST_NO_AUTORESIZE)
         self.standards_status.SetMinSize((1, -1))
         grid.Add(self.standards_status, 1, wx.EXPAND)
         grid.Add(wx.StaticText(box.GetStaticBox(), label='Backups folder'), 0, wx.ALIGN_CENTER_VERTICAL)
@@ -139,7 +141,8 @@ class ProjectManagerFrame(wx.Frame):
         self._overview_note_text = ('Review template changes and add missing files here. '
                                     'Project Setup edits metadata and documentation status. '
                                     'Design Rules and Stackup use the shared standards repository. Apply after the PCB and schematic editors are closed.')
-        note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text)
+        note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text,
+                                                    style=wx.ST_NO_AUTORESIZE)
         note.SetMinSize((1, -1))
         overview_layout.Add(note, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         overview_layout.Add(wx.StaticText(overview, label="Activity"), 0, wx.LEFT | wx.TOP, 16)

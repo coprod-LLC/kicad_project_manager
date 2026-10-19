@@ -20,7 +20,7 @@ if sys.platform == "linux" and os.environ.get("DISPLAY"):
 import wx
 
 from project_manager.context import ContextError, ProjectContext
-from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame
+from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame, _wrap_text
 from project_manager.setup import read_setup
 from project_manager.setup_ui import PreviewDialog
 from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
@@ -74,6 +74,14 @@ def main() -> int:
     failures = []
     phase = 0
     logged_phase = None
+    wrap_widths = {}
+
+    def measured_wrap(control, value, width):
+        wrapped = _wrap_text(control, value, width)
+        wrap_widths[control.GetId()] = (width, max((control.GetTextExtent(line).width
+                                                  for line in wrapped.splitlines()), default=0))
+        return wrapped
+
     source_script = template / 'kibot_resources/scripts/helper.py'
     source_script_before = source_script.read_bytes()
     small_status_height = 0
@@ -343,7 +351,10 @@ def main() -> int:
         assert status.y + status.height <= buttons.y, 'Template status overlaps buttons'
         for line in frame.template_status.GetLabel().splitlines():
             width = frame.template_status.GetTextExtent(line).width
-            assert width <= status.width, f'Template status clips horizontally: {width} > {status.width}: {line!r}'
+            assert width <= status.width, (
+                f'Template status clips horizontally: {width} > {status.width}; '
+                f'client={frame.template_status.GetClientSize()}, '
+                f'wrapped_at={wrap_widths.get(frame.template_status.GetId())}: {line!r}')
 
     def assert_header_layout():
         refresh = frame.refresh_button.GetScreenRect()
@@ -693,7 +704,8 @@ def main() -> int:
     # The phase timeout cannot fire while a failed callback leaves a modal dialog
     # open. Bound the entire event loop and print thread stacks on a stuck test.
     faulthandler.dump_traceback_later(45, exit=True)
-    app.MainLoop()
+    with patch('project_manager.ui._wrap_text', side_effect=measured_wrap):
+        app.MainLoop()
     faulthandler.cancel_dump_traceback_later()
     temporary.cleanup()
     if failures:
