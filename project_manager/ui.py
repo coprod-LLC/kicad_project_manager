@@ -23,8 +23,8 @@ from .yaml_fields import SetupError
 
 
 def _wrap_text(control: wx.StaticText, value: str, width: int) -> str:
-    # wx 3.2's Mac Wrap uses partial glyph extents that can underestimate a
-    # complete line. Measure whole candidate lines with the actual label font.
+    # Measure whole lines with the label's font. Start from the original text
+    # each time so widening the window also removes old line breaks.
     lines = []
     for paragraph in value.split('\n'):
         line = ''
@@ -51,6 +51,7 @@ class ProjectManagerFrame(wx.Frame):
         self.template_source: Path | None = None
         self.template_error_details: str | None = None
         self._overview_layout_pending = False
+        self._overview_text_widths = {}
         icon_path = Path(__file__).resolve().parent.parent / "resources" / "icon.png"
         if icon_path.is_file():
             self.SetIcon(wx.Icon(str(icon_path), wx.BITMAP_TYPE_PNG))
@@ -144,6 +145,8 @@ class ProjectManagerFrame(wx.Frame):
         note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text,
                                                     style=wx.ST_NO_AUTORESIZE)
         note.SetMinSize((1, -1))
+        for control in (self.template_status, self.standards_status, note):
+            control.Bind(wx.EVT_SIZE, self._on_overview_text_size)
         overview_layout.Add(note, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         overview_layout.Add(wx.StaticText(overview, label="Activity"), 0, wx.LEFT | wx.TOP, 16)
         self.log = wx.TextCtrl(overview, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 110))
@@ -201,6 +204,15 @@ class ProjectManagerFrame(wx.Frame):
 
     def _on_overview_size(self, event):
         self._queue_overview_layout()
+        event.Skip()
+
+    def _on_overview_text_size(self, event):
+        # Cocoa may allocate the final child width after the overview's size
+        # event. Rewrap when that width arrives; height changes need no rewrap.
+        key, width = event.GetId(), event.GetSize().width
+        if self._overview_text_widths.get(key) != width:
+            self._overview_text_widths[key] = width
+            self._queue_overview_layout()
         event.Skip()
 
     def _queue_overview_layout(self):
