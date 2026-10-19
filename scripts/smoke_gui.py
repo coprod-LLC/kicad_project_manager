@@ -109,7 +109,9 @@ def main() -> int:
                         style = wx.TextAttr()
                         assert dialog.results.GetStyle(offset, style), f'No style at {offset}: {item.path}'
                         actual = style.GetTextColour()
-                        assert actual == expected[item.path], (
+                        # Cocoa can return an NSColor with identical RGBA but
+                        # different native colour-space identity.
+                        assert actual.Get() == expected[item.path].Get(), (
                             f'{item.path}: actual={actual.Get()}, expected={expected[item.path].Get()}')
                 except Exception as exc:
                     failures.append(f'Details colors: {exc}')
@@ -121,8 +123,8 @@ def main() -> int:
         assert not failures
         with TemplateReviewDialog(frame, comparison) as dialog:
             for index, item in enumerate(comparison.items):
-                assert item_colour(item) == expected[item.path]
-                assert dialog.files.GetItemTextColour(index) == expected[item.path]
+                assert item_colour(item).Get() == expected[item.path].Get()
+                assert dialog.files.GetItemTextColour(index).Get() == expected[item.path].Get()
 
     def review_template():
         print('GUI: cancelling template review', flush=True)
@@ -447,7 +449,7 @@ def main() -> int:
                 assert (project / STATE).is_file()
                 assert frame.template_comparison.colour == 'green'
                 assert 'Matches installed template' in frame.template_status.GetLabel()
-                assert frame.template_status.GetForegroundColour() == FOUND_COLOUR
+                assert frame.template_status.GetForegroundColour().Get() == FOUND_COLOUR.Get()
                 assert (project / 'kibot_resources/fonts/font.ttf').is_file()
                 assert (project / 'kibot_resources/templates/assembly_notes.txt').read_text() == 'Project-specific assembly notes\n'
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 2
@@ -591,7 +593,7 @@ def main() -> int:
                     return
                 assert panel.feedback.IsShown()
                 assert 'KiCad still has this project open' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MODIFIED_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MODIFIED_COLOUR.Get()
                 assert std_board.read_bytes() == before[std_board]
                 frame.SetSize((860, 640))
                 phase = 806
@@ -616,7 +618,7 @@ def main() -> int:
                 assert len(panel.selected_stackup.stack.copper) == 6
                 assert panel.current_stackup.stack.impedance_controlled
                 assert 'Stackup applied' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
                 assert 'Example Fab · EX0616' in panel.current_stackup.title.GetLabel()
                 assert 'settings differ' not in panel.current_stackup.title.GetLabel()
                 assert not panel.capture_button.IsShown(), 'Applying a catalog stackup must hide Save as preset'
@@ -632,7 +634,7 @@ def main() -> int:
                     wx.CallLater(100, check)
                     return
                 assert 'already applied' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
                 assert all(p.read_bytes() == data for p, data in before.items())
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 6
                 phase = 9
@@ -645,7 +647,7 @@ def main() -> int:
                 assert frame.template_comparison is None
                 assert 'Installed template modified' in frame._template_status_text
                 assert 'manifest' not in frame.template_status.GetLabel().lower()
-                assert frame.template_status.GetForegroundColour() == MISSING_COLOUR
+                assert frame.template_status.GetForegroundColour().Get() == MISSING_COLOUR.Get()
                 assert frame.template_details_button.IsEnabled()
                 assert not frame.template_review_button.IsEnabled()
                 with patch('project_manager.ui.show_text_details') as details:
