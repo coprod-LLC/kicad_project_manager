@@ -21,6 +21,24 @@ from .template_ui import (MATCH_COLOUR as FOUND_COLOUR, MODIFIED_COLOUR, MISSING
                           TemplateReviewDialog, show_details, show_text_details)
 from .yaml_fields import SetupError
 
+
+def _wrap_text(control: wx.StaticText, value: str, width: int) -> str:
+    # wx 3.2's Mac Wrap uses partial glyph extents that can underestimate a
+    # complete line. Measure whole candidate lines with the actual label font.
+    lines = []
+    for paragraph in value.split('\n'):
+        line = ''
+        for word in paragraph.split():
+            candidate = f'{line} {word}' if line else word
+            if line and control.GetTextExtent(candidate).width > width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        lines.append(line)
+    return '\n'.join(lines)
+
+
 class ProjectManagerFrame(wx.Frame):
     def __init__(self, provider: Callable[[], ProjectContext], storage: Path | None = None):
         super().__init__(None, title=f"{NAME} — {__version__}", size=(1100, 940))
@@ -203,8 +221,7 @@ class ProjectManagerFrame(wx.Frame):
             widths = [max(1, control.GetClientSize().width) for control, _ in controls]
             for (control, value), width in zip(controls, widths):
                 control.SetMinSize((1, -1))
-                control.SetLabel(value)
-                control.Wrap(width)
+                control.SetLabel(_wrap_text(control, value, width))
                 control.InvalidateBestSize()
                 control.SetMinSize((1, control.GetBestSize().height))
             self.overview.Layout()
