@@ -25,7 +25,9 @@ BRANCH = 'port/kicad10'
 
 
 def run(command: list[str], **kwargs) -> str:
-    return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT, **kwargs).strip()
+    # KiCad may print first-run/cache warnings on stderr even for `version`.
+    # Keep those separate from the machine-readable stdout.
+    return subprocess.check_output(command, text=True, stderr=subprocess.PIPE, **kwargs).strip()
 
 
 def find_cli(platform: str, home: Path) -> Path:
