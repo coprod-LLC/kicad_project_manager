@@ -191,20 +191,26 @@ class ProjectManagerFrame(wx.Frame):
         self._overview_layout_pending = False
         if self._closing:
             return
-        # Wrap to the actual column width, and reserve the full wrapped height.
-        # Always start from the original text so widening also removes old wraps.
-        for control, value, width in (
-                (self.template_status, self._template_status_text, self._template_box.GetSize().width),
-                (self.standards_status, self.standards_status.GetToolTipText() or self.standards_status.GetLabel(),
-                 self._template_box.GetSize().width),
-                (self._overview_note, self._overview_note_text, self.overview.GetClientSize().width - 32)):
-            control.SetMinSize((1, -1))
-            control.SetLabel(value)
-            control.Wrap(max(1, width))
-            control.InvalidateBestSize()
-            control.SetMinSize((1, control.GetBestSize().height))
+        # Native static boxes and scrollbars can leave less room than the column
+        # sizer reports. Measure each allocated control, then recheck after the
+        # wrapped height has changed the scrolling area.
+        controls = (
+                (self.template_status, self._template_status_text),
+                (self.standards_status, self.standards_status.GetToolTipText() or self.standards_status.GetLabel()),
+                (self._overview_note, self._overview_note_text))
         self.overview.Layout()
-        self.overview.FitInside()
+        for _ in range(3):
+            widths = [max(1, control.GetClientSize().width) for control, _ in controls]
+            for (control, value), width in zip(controls, widths):
+                control.SetMinSize((1, -1))
+                control.SetLabel(value)
+                control.Wrap(width)
+                control.InvalidateBestSize()
+                control.SetMinSize((1, control.GetBestSize().height))
+            self.overview.Layout()
+            self.overview.FitInside()
+            if all(control.GetClientSize().width == width for (control, _), width in zip(controls, widths)):
+                break
 
     def _set_template_status(self, value: str, colour):
         self._template_status_text = value

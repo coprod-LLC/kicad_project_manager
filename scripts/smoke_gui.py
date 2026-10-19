@@ -342,7 +342,8 @@ def main() -> int:
         buttons = frame.template_details_button.GetScreenRect()
         assert status.y + status.height <= buttons.y, 'Template status overlaps buttons'
         for line in frame.template_status.GetLabel().splitlines():
-            assert frame.template_status.GetTextExtent(line).width <= status.width, 'Template status clips horizontally'
+            width = frame.template_status.GetTextExtent(line).width
+            assert width <= status.width, f'Template status clips horizontally: {width} > {status.width}: {line!r}'
 
     def assert_header_layout():
         refresh = frame.refresh_button.GetScreenRect()
@@ -682,6 +683,10 @@ def main() -> int:
         except Exception as exc:
             traceback.print_exc()
             failures.append(str(exc) or type(exc).__name__)
+            try:
+                capture(frame, args.output.with_name('gui-failure.png'))
+            except Exception:
+                traceback.print_exc()
             frame.Destroy()
 
     wx.CallLater(250, check)
