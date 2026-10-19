@@ -90,7 +90,7 @@ def write(path: Path, content: str) -> None:
 
 
 def update_json(path: Path, edit) -> None:
-    value = json.loads(path.read_text()) if path.exists() else {}
+    value = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     if not isinstance(value, dict):
         raise ValueError(f'{path} must contain a JSON object; it was left untouched.')
     edit(value)
@@ -108,7 +108,7 @@ def link(source: Path, target: Path) -> None:
 
 def library_table(path: Path, root_name: str, entries: dict[str, tuple[str, Path]]) -> None:
     if path.exists():
-        text = path.read_text()
+        text = path.read_text(encoding='utf-8')
     else:
         text = (f'({root_name} (version 7)\n  (lib (name "KiCad") (type "Table") '
                 f'(uri "${{KICAD10_TEMPLATE_DIR}}/{path.name}") (options "") (descr "KiCad libraries"))\n)\n')
@@ -161,7 +161,7 @@ def install(repos: dict[str, Path], home: Path, platform: str, python: Path) -> 
         pcm = paths['plugins'].parent / '3rdparty/plugins'
         if pcm.exists():
             for manifest in pcm.rglob('plugin.json'):
-                if json.loads(manifest.read_text()).get('name') == json.loads((repos[name] / 'plugin.json').read_text()).get('name'):
+                if json.loads(manifest.read_text(encoding='utf-8')).get('name') == json.loads((repos[name] / 'plugin.json').read_text(encoding='utf-8')).get('name'):
                     raise ValueError(f'Uninstall the KiCad 10 PCM copy at {manifest.parent} first.')
         link(repos[name], paths['plugins'] / name)
     link(repos['kicad_coprod_template_kibot'], paths['templates'] / 'coprod-kicad10')

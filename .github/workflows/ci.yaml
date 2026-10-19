@@ -9,6 +9,31 @@ permissions:
   contents: read
 
 jobs:
+  mac_bundle:
+    name: Official KiCad 10.0.7 Mac Python
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify the official universal Mac bundle
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.7/kicad-unified-universal-10.0.7.dmg \
+            -o "$RUNNER_TEMP/kicad.dmg"
+          echo "fbc27419b841a9a2a8b143b5875a87b8bd943ffcf487d53c78a8fb6d24c59e27  $RUNNER_TEMP/kicad.dmg" | shasum -a 256 --check
+          hdiutil attach "$RUNNER_TEMP/kicad.dmg" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/kicad-volume"
+      - name: Verify native CLI, installer discovery and managed plugin Python
+        shell: bash
+        run: |
+          app="$RUNNER_TEMP/kicad-volume/KiCad/KiCad.app/Contents"
+          python="$app/Frameworks/Python.framework/Versions/Current/bin/python3"
+          "$app/MacOS/kicad-cli" version
+          "$python" -c 'import sys,ssl,venv,wx; from wx.svg import SVGimage; print(sys.version); print(wx.version())'
+          "$python" scripts/setup_port.py --cli "$app/MacOS/kicad-cli" --dry-run
+          "$python" -m venv --system-site-packages "$RUNNER_TEMP/port-python"
+          "$RUNNER_TEMP/port-python/bin/python" -m pip install -r requirements.txt
+          "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
   test:
     runs-on: ${{ matrix.os }}
     strategy:
