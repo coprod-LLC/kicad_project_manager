@@ -21,6 +21,9 @@ and installs the 10 color theme. It keeps 9 settings and plugin
 links unchanged. Existing 10 config changes get timestamped backups. Conflicting
 plugin installations or library nicknames produce an actionable error.
 
+The official 10.0.7 Mac app bundles Python **3.9.13** and wxPython **4.2.2a1**;
+both plugin manifests accept Python 3.9. No separate Python install is needed.
+
 Open a **copied project in KiCad 10 PCB Editor** and launch both plugins from
 Tools → External Plugins. KiCad installs their Python dependencies on first launch;
 that first launch needs internet. Subsequent source edits take effect after closing

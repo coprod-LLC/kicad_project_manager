@@ -15,6 +15,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the companion Library Manager port
+        uses: actions/checkout@v4
+        with:
+          repository: theohg-coprod/kicad_library_manager
+          ref: port/kicad10
+          path: .dev/library-manager
+          persist-credentials: false
       - name: Download and verify the official universal Mac bundle
         shell: bash
         run: |
@@ -32,15 +39,19 @@ jobs:
           "$python" -c 'import sys,ssl,venv,wx; from wx.svg import SVGimage; print(sys.version); print(wx.version())'
           "$python" scripts/setup_port.py --cli "$app/MacOS/kicad-cli" --dry-run
           "$python" -m venv --system-site-packages "$RUNNER_TEMP/port-python"
-          "$RUNNER_TEMP/port-python/bin/python" -m pip install -r requirements.txt
+          "$RUNNER_TEMP/port-python/bin/python" -m pip install -r requirements.txt -r .dev/library-manager/requirements.txt
           "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
+          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
+          cd .dev/library-manager
+          "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
+          "$RUNNER_TEMP/port-python/bin/python" -c 'from library_manager.ui import MainDialog, RepoSettingsDialog; from library_manager.paths import config_directory; print(config_directory())'
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.9', '3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

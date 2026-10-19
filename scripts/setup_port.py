@@ -55,7 +55,8 @@ def find_python(cli: Path) -> Path:
                   cli.parent / 'python3.11', cli.parent / 'python3', Path(sys.executable)]
     for path in candidates:
         try:
-            run([str(path), '-c', 'import sys,ssl,venv,wx; assert sys.version_info >= (3,10); from wx.svg import SVGimage'], timeout=15)
+            # The official KiCad 10.0.7 Mac bundle still ships Python 3.9.13.
+            run([str(path), '-c', 'import sys,ssl,venv,wx; assert sys.version_info >= (3,9); from wx.svg import SVGimage'], timeout=15)
             return path
         except (OSError, subprocess.SubprocessError):
             pass

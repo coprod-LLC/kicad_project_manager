@@ -3,7 +3,7 @@
   "identifier": "org.kicadprojectmanager.plugin",
   "name": "KiCad Project Manager",
   "description": "Template updates, project setup, and standards for KiCad",
-  "runtime": {"type": "python", "min_version": "3.10"},
+  "runtime": {"type": "python", "min_version": "3.9"},
   "actions": [{
     "identifier": "open",
     "name": "KiCad Project Manager",
