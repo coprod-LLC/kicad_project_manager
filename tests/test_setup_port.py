@@ -48,7 +48,7 @@ class PortableSetupTests(unittest.TestCase):
         self.assertTrue((paths['config'] / 'colors/Altium_Theme.json').is_file())
         self.assertEqual(json.loads(common.read_text())['keep'], 'KiCad 10 settings')
         self.assertTrue(json.loads(common.read_text())['api']['enable_server'])
-        self.assertEqual((paths['plugins'] / 'kicad_library_manager').resolve(), self.repos['kicad_library_manager'])
+        self.assertEqual((paths['plugins'] / 'kicad_library_manager').resolve(), self.repos['kicad_library_manager'].resolve())
         self.assertEqual(json.loads(paths['library'].read_text())['repo_path'], str(self.repos['kicad_coprod_lib']))
         before_files = {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file() and not p.is_symlink()}
         install(self.repos, self.home, 'darwin', python)
