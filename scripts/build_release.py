@@ -13,11 +13,11 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = (
     "plugin.json", "requirements.txt", "run_project_manager.py", "LICENSE", "README.md",
-    "docs/usage.md", "docs/development.md", "docs/standards-format.md",
+    "docs/usage.md", "docs/development.md", "docs/standards-format.md", "docs/port-mac.md",
     "docs/screenshots/overview.png", "docs/screenshots/project-setup.png",
     "docs/screenshots/design-rules.png", "docs/screenshots/stackup.png",
     "docs/screenshots/template-review.png",
-    "project_manager/__init__.py", "project_manager/context.py", "project_manager/ui.py",
+    "project_manager/__init__.py", "project_manager/context.py", "project_manager/compat.py", "project_manager/ui.py",
     "project_manager/yaml_fields.py", "project_manager/setup.py",
     "project_manager/preferences.py", "project_manager/setup_ui.py",
     "project_manager/settings_ui.py", "project_manager/standards.py",
@@ -78,7 +78,7 @@ def build(root: Path, output: Path, tag: str, repository: str) -> tuple[Path, Pa
     validate_plugin_identifier(manifest["identifier"])
     entry = {
         "version": version, "status": "testing", "runtime": "ipc",
-        "kicad_version": "9.0", "kicad_version_max": "9.99",
+        "kicad_version": "9.0", "kicad_version_max": "10.99",
         "platforms": ["windows", "macos", "linux"],
     }
     metadata["versions"] = [entry]

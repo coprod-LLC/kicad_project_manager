@@ -13,7 +13,7 @@ import re
 from .json_text import JsonTextError, merge_named_list, update_object
 from .setup import Change, SetupError, commit_changes, git_value
 from .sexpr import ExpressionError, atoms, canonical, forms, spans, tokens
-from .standards import Catalog, Preset, StandardsError, _constraints, _netclasses
+from .standards import Catalog, Preset, StandardsError, _board_major, _constraints, _netclasses
 
 PROVENANCE = 'kpm-standards.json'
 COMPANY_BEGIN = '# kicad_project_manager: begin company rules'
@@ -379,10 +379,9 @@ def merge_board(text: str, stackup: Preset) -> tuple[str, list[str], list[str], 
     if not re.match(r'\s*\(kicad_pcb(?:\s|\))', text):
         raise StandardsError('Expected a KiCad board file.')
     top = list(spans(text, children=True))
-    _name, version_start, version_end = _only(top, 'version')
-    version = atoms(text[version_start:version_end])
-    if len(version) < 2 or version[1] != '20241229':
-        raise StandardsError('Applying standards currently supports the KiCad 9 board file format (20241229).')
+    major = _board_major(text)
+    if major not in stackup.details.get('compatible_kicad_majors', [9]):
+        raise StandardsError(f'This stackup has not been qualified for KiCad {major}.')
     _name, layers_start, layers_end = _only(top, 'layers')
     _name, general_start, general_end = _only(top, 'general')
     _name, setup_start, setup_end = _only(top, 'setup')
@@ -446,6 +445,17 @@ def _areas_and_nets(board: str) -> tuple[set[str], set[str]]:
                 for field_name, field in forms(zone, children=True):
                     if field_name == 'name' and len(atoms(field)) > 1:
                         areas.add(str(atoms(field)[1]))
+    # KiCad 10 stores net names on connected items, without the old root netcodes.
+    stack = []
+    for token, _left, _right in tokens(board):
+        if token == '(':
+            stack.append([])
+        elif token == ')':
+            fields = stack.pop()
+            if fields and fields[0] == 'net' and len(fields) == 2 and fields[1].startswith('"'):
+                nets.add(json.loads(fields[1]))
+        elif stack:
+            stack[-1].append(token)
     return areas, nets
 
 
@@ -540,9 +550,10 @@ def _plan(project_file: Path, board_file: Path, rules: Preset | None, stackup: P
     provenance_text, provenance_bom = _decode(provenance_bytes, PROVENANCE) if provenance_bytes is not None else (None, False)
     if not re.match(r'\s*\(kicad_pcb(?:\s|\))', board_text):
         raise StandardsError('Expected a KiCad board file.')
-    version = [item for item in spans(board_text, children=True) if item[0] == 'version']
-    if len(version) != 1 or atoms(board_text[version[0][1]:version[0][2]])[1:] != ['20241229']:
-        raise StandardsError('Comparison currently supports the KiCad 9 board file format (20241229).')
+    major = _board_major(board_text)
+    for preset in (rules, stackup):
+        if preset is not None and major not in preset.details.get('compatible_kicad_majors', [9]):
+            raise StandardsError(f'The preset {preset.name!r} has not been qualified for KiCad {major}.')
     commit, dirty = _source_identity(catalog.root if catalog else None)
     catalog_name = catalog.name if catalog else ''
     summary, changes, missing_dependencies = [], [], []

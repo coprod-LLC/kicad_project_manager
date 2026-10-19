@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 from .preferences import data_directory
+from .compat import SUPPORTED_MAJORS
 from .yaml_fields import ScalarBlock, SetupError
 
 METADATA = ('PROJECT_NAME', 'BOARD_NAME', 'COMPANY', 'DESIGNER', 'REVIEWER', 'GIT_URL', 'LOGO')
@@ -55,8 +56,8 @@ def workflow_block(data: bytes) -> ScalarBlock:
     block = ScalarBlock(data, 'env', ('kibot_variant', 'kibot_config', 'kicad_version'))
     if block.values['kibot_config'].removeprefix('./') != CONFIG:
         raise SetupError(f'This workflow does not use {CONFIG}. Its configuration is unsupported.')
-    if block.values['kicad_version'] != '9':
-        raise SetupError('This workflow targets a different KiCad version. Select a KiCad 9 template.')
+    if block.values['kicad_version'] not in {str(major) for major in SUPPORTED_MAJORS}:
+        raise SetupError('This workflow must target KiCad 9 or 10.')
     return block
 
 

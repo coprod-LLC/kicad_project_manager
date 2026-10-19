@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 import os
+from .compat import SUPPORTED_MAJORS
 
 
 class ContextError(RuntimeError):
@@ -84,9 +85,9 @@ def detect_context(
             timeout_ms=2500,
         )
         version = client.get_version()
-        if version.major != 9:
+        if version.major not in SUPPORTED_MAJORS:
             raise ContextError(
-                f"This release supports KiCad 9 only; the connected editor is {version.full_version}."
+                f"This release supports KiCad 9 and 10; the connected editor is {version.full_version}."
             )
         documents = client.get_open_documents(DocumentType.DOCTYPE_PCB)
         if not documents:

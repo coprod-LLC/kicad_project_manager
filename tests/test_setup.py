@@ -230,7 +230,7 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(setup.prepare(custom, custom.metadata, 'CHECKED').changes)
 
     def test_wrong_workflow_config_or_kicad_version_is_rejected(self):
-        for old, new in [(b'kicad_version: 9', b'kicad_version: 10'),
+        for old, new in [(b'kicad_version: 9', b'kicad_version: 11'),
                          (b'kibot_yaml/kibot_main.yaml', b'other.yaml')]:
             with self.subTest(new=new), self.assertRaises(SetupError):
                 setup.workflow_block(WORKFLOW_TEXT.encode().replace(old, new))

@@ -6,3 +6,6 @@ dist/
 site/
 .pytest_cache/
 .DS_Store
+
+# Extra development checkouts installed by setup_port.command
+.port-repos/

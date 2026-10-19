@@ -142,7 +142,7 @@ class ProjectManagerFrame(wx.Frame):
         self.notebook.AddPage(self.stackup_panel, 'Stackup')
         layout.Add(self.notebook, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         footer = wx.BoxSizer(wx.HORIZONTAL)
-        footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9"), 1, wx.ALIGN_CENTER_VERTICAL)
+        footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9 / 10"), 1, wx.ALIGN_CENTER_VERTICAL)
         close = wx.Button(panel, id=wx.ID_CLOSE)
         close.Bind(wx.EVT_BUTTON, lambda event: self.Close())
         footer.Add(close)
@@ -252,7 +252,6 @@ class ProjectManagerFrame(wx.Frame):
         self.choose_template_button.Disable()
         self.template_details_button.Disable()
         self.template_review_button.Disable()
-        template_directory = kicad_user_template_directory()
         for panel in self.standards_panels:
             panel.reload_catalog()
 
@@ -261,6 +260,7 @@ class ProjectManagerFrame(wx.Frame):
             template_result = (None, None, None)
             try:
                 context = self._provider()
+                template_directory = kicad_user_template_directory(major=int(context.kicad_version.split('.')[0]))
                 if context.project_saved:
                     source = None
                     try:
@@ -350,7 +350,7 @@ class ProjectManagerFrame(wx.Frame):
             return None
         if not self._can_discard():
             return None
-        start = kicad_user_template_directory()
+        start = kicad_user_template_directory(major=int(self._context.kicad_version.split('.')[0]))
         while not start.exists() and start != start.parent:
             start = start.parent
         dialog = wx.DirDialog(self, "Choose the versioned KiCad template folder",

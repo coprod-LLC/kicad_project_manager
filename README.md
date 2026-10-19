@@ -1,7 +1,12 @@
 # KiCad Project Manager
 
-A native **KiCad 9** plugin for KiBot project setup, template updates, design
+A native **KiCad 9 / 10** plugin for KiBot project setup, template updates, design
 rules and PCB stackups. Use your own compatible templates and standards folders.
+
+## KiCad 10 port trial
+
+For the five-repository development setup and one-command symlink installation,
+see [Mac trial setup](docs/port-mac.md). This branch has not been released to PCM.
 
 ## Install
 

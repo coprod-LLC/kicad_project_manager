@@ -70,8 +70,8 @@ class ContextTests(unittest.TestCase):
                     detect_context("ipc:///test", client_factory=factory, environ={})
 
     def test_other_kicad_major_is_rejected(self):
-        factory = lambda **kw: NS(get_version=lambda: NS(major=10, full_version="10.0.1"))
-        with self.assertRaisesRegex(ContextError, "KiCad 9 only"):
+        factory = lambda **kw: NS(get_version=lambda: NS(major=11, full_version="11.0.0"))
+        with self.assertRaisesRegex(ContextError, "KiCad 9 and 10"):
             detect_context("ipc:///test", client_factory=factory, environ={})
 
     def test_transport_failure_has_no_secrets(self):

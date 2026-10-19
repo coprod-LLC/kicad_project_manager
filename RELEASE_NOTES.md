@@ -1,3 +1,11 @@
+KiCad Project Manager v0.8.0 — unreleased port branch
+
+- Support KiCad 9 and 10 IPC, workflows and their explicitly recognized board formats.
+- Preserve a project's selected KiCad major during template updates.
+- Require standards to declare compatibility before applying them to another major.
+- Read KiCad 10 net names and retain the source major when capturing stackup presets.
+- Select template/install paths for the intended major, including documents-root overrides.
+
 KiCad Project Manager v0.7.0
 
 - Review template files in batches with Shift/Ctrl selection and partial apply.

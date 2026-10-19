@@ -8,22 +8,42 @@ import sys
 import tempfile
 
 
-def kicad_user_template_directory(environ: dict | None = None, platform: str | None = None) -> Path:
-    """KiCad 9's per-user template folder. ``KICAD_USER_TEMPLATE_DIR`` overrides the default."""
+_RUNTIME_MAJOR = 9
+
+
+def configure_runtime(major: int) -> None:
+    """Keep KiCad 10 settings, backups and instance lock separate from KiCad 9."""
+    from .compat import SUPPORTED_MAJORS
+    if major not in SUPPORTED_MAJORS:
+        raise ValueError('Choose KiCad 9 or 10.')
+    global _RUNTIME_MAJOR
+    _RUNTIME_MAJOR = major
+
+
+def kicad_user_template_directory(environ: dict | None = None, platform: str | None = None,
+                                  major: int = 9) -> Path:
+    """The connected KiCad major's template folder, honoring explicit path overrides."""
+    from .compat import SUPPORTED_MAJORS
+    if major not in SUPPORTED_MAJORS:
+        raise ValueError('Choose KiCad 9 or 10.')
     env = os.environ if environ is None else environ
     system = sys.platform if platform is None else platform
     override = str(env.get('KICAD_USER_TEMPLATE_DIR', '')).strip()
     if override:
         return Path(override).expanduser()
+    version = f'{major}.0'
+    if env.get('KICAD_DOCUMENTS_HOME'):
+        app = 'kicad' if system == 'linux' else 'KiCad'
+        return Path(env['KICAD_DOCUMENTS_HOME']).expanduser() / app / version / 'template'
     if system == 'win32':
         home = Path(env.get('USERPROFILE') or Path.home())
-        return home / 'Documents' / 'KiCad' / '9.0' / 'template'
+        return home / 'Documents' / 'KiCad' / version / 'template'
     if system == 'darwin':
         home = Path(env.get('HOME') or Path.home())
-        return home / 'Documents' / 'KiCad' / '9.0' / 'template'
+        return home / 'Documents' / 'KiCad' / version / 'template'
     data = str(env.get('XDG_DATA_HOME', '')).strip()
     base = Path(data).expanduser() if data else Path(env.get('HOME') or Path.home()) / '.local' / 'share'
-    return base / 'kicad' / '9.0' / 'template'
+    return base / 'kicad' / version / 'template'
 
 
 def data_directory() -> Path:
@@ -33,7 +53,8 @@ def data_directory() -> Path:
         base = Path.home() / 'Library/Application Support'
     else:
         base = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
-    return base / 'kicad_project_manager'
+    directory = base / 'kicad_project_manager'
+    return directory / '10.0' if _RUNTIME_MAJOR == 10 else directory
 
 
 def load_settings(directory: Path | None = None, *, strict: bool = False) -> dict:

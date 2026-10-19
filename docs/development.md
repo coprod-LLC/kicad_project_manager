@@ -8,10 +8,10 @@ installation and the [usage guide](usage.md) for everyday operation.
 ```sh
 git clone https://github.com/coprod-LLC/kicad_project_manager.git
 cd kicad_project_manager
-python3 scripts/install_dev.py
+python3 scripts/install_dev.py --kicad-major 10
 ```
 
-The helper links this checkout into KiCad 9’s IPC `plugins/` folder and refuses
+The helper links this checkout into the selected KiCad major’s IPC `plugins/` folder and refuses
 to replace an existing installation. Uninstall PCM copies first, including
 packages with earlier identities. Use `--plugins-dir` for a custom location.
 On Windows, enable Developer Mode for symlinks or copy the complete checkout.
@@ -44,7 +44,7 @@ session token automatically. Diagnostics contain local paths.
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.7.0
+python -m scripts.build_release --tag v0.8.0
 python -m scripts.validate_package --schemas /usr/share/kicad/schemas
 python -m scripts.smoke_gui --output .dev/gui.png
 python -m scripts.smoke_stackup_save --output .dev/save-preset

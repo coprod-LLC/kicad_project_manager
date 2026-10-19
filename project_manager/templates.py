@@ -212,7 +212,8 @@ def adapted(path: str, incoming: bytes, current: bytes | None) -> bytes:
         incoming = metadata_block(incoming).replace(values, prefer_plain=('REVIEWER',))
     elif kind == 'workflow':
         values = workflow_block(current).values
-        incoming = workflow_block(incoming).replace({'kibot_variant': values['kibot_variant']})
+        incoming = workflow_block(incoming).replace({key: values[key]
+                                                    for key in ('kibot_variant', 'kicad_version')})
     elif kind == 'release_variables':
         value, _ = release_entries(text(incoming))
         _, entries = release_entries(text(current))
@@ -443,7 +444,7 @@ def compare(root: Path, template: Template) -> Comparison:
                 raise SetupError(f'Document baseline hash mismatch for {relative}.')
         incoming = adapted(relative, data, current)
         merged = None
-        expected_hash = digest(canonical(relative, data))
+        expected_hash = digest(canonical(relative, incoming if policy(relative) == 'workflow' else data))
         current_hash = digest(canonical(relative, current)) if current is not None else None
         if current is None:
             status, action = 'Missing required file', 'use'
@@ -521,6 +522,8 @@ def prepare_upgrade(comparison: Comparison, choices: dict[str, str], edits: dict
         if after != item.current:
             changes.append(Change(item.path, item.current, after))
         data = comparison.template.files[item.path]
+        if policy(item.path) == 'workflow':
+            data = item.incoming
         files[item.path] = {'policy': policy(item.path), 'hash': digest(canonical(item.path, data))}
         if policy(item.path) == 'document':
             files[item.path]['content'] = text(data)

@@ -1,6 +1,6 @@
 # Standards catalog format
 
-The plugin requires catalog schema 2 for KiCad 9. The loader rejects
+The plugin requires catalog schema 2 for KiCad 9 and 10. The loader rejects
 catalog schema 1. Select the folder containing `catalog.json` in Overview.
 
 ```json
@@ -98,7 +98,7 @@ Deleting a catalog file does not modify projects that already used it.
 
 ## Save as preset
 
-The Stackup tab captures native text from the saved KiCad 9 board and creates a
+The Stackup tab captures native text from the saved KiCad 9 or 10 board and creates a
 document in exactly this format. Metadata and optional impedance guides are
 validated before saving. No review-status field, local board path, project rules
 or enabled-layer aliases are copied into the document.
@@ -114,3 +114,15 @@ review rather than being merged automatically.
 The writer checks source-board and catalog changes again, then atomically creates
 a single file without replacing an existing destination. The catalog is refreshed
 and the new preset selected. Saving performs no board writes or Git operations.
+## KiCad version compatibility
+
+Catalogs and stackup documents retain `kicad_major`. The optional
+`compatible_kicad_majors: [9, 10]` declares additional tested targets; omitted
+means only `kicad_major`. A preset's targets must be included in its catalog's
+targets. Unqualified presets are rejected before writes. Capturing a board
+records its actual major; it does not automatically qualify another version.
+
+The plugin recognizes saved PCB formats `20241229` (9) and `20260206` (10).
+Unknown future formats remain blocked. Use separate standards branches while
+older plugin releases are still deployed: those releases cannot load a
+10-only captured preset. Existing 9-only catalogs remain supported.
