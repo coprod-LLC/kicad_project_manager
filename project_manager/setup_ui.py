@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
+import logging
 import wx
 import wx.lib.scrolledpanel
 
@@ -41,6 +42,8 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         self._author_display = ''
         self._author_value = ''
         self._loaded_values = {}
+        self._feedback_text = ''
+        self._feedback_root: Path | None = None
         layout = wx.BoxSizer(wx.VERTICAL)
         self.message = wx.StaticText(self, label='Connect to a saved template project to edit setup.')
         self.message.Wrap(740)
@@ -74,6 +77,9 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         note = wx.StaticText(self, label='KiBot updates document text variables on the next CI run. Version tags select RELEASED and run ERC/DRC; selecting CHECKED first is not required by the template.')
         note.Wrap(740)
         layout.Add(note, 0, wx.EXPAND | wx.ALL, 14)
+        self.feedback = wx.StaticText(self, label='', style=wx.ST_NO_AUTORESIZE)
+        self.feedback.SetMinSize((1, 0))
+        layout.Add(self.feedback, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
         row = wx.BoxSizer(wx.HORIZONTAL)
         row.AddStretchSpacer()
         self.preview_button = wx.Button(self, label='Preview Changes…')
@@ -86,7 +92,37 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         layout.Add(row, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
         self.SetSizer(layout)
         self.SetupScrolling(scroll_x=False)
+        for field in self.fields.values():
+            field.Bind(wx.EVT_TEXT, self._edited)
+        for choice in (self.status_choice, self.kicad_choice):
+            choice.Bind(wx.EVT_CHOICE, self._edited)
+        self.Bind(wx.EVT_SIZE, self._resize_feedback)
         self.clear('Reading the active project…')
+
+    def _show_feedback(self, text: str, *, error: bool = False, root: Path | None = None):
+        self._feedback_text = text
+        self._feedback_root = root
+        self.feedback.SetForegroundColour(wx.Colour(220, 70, 70) if error else wx.Colour(46, 170, 80))
+        self.feedback.SetToolTip(text)
+        self._layout_feedback()
+
+    def _layout_feedback(self):
+        if not self:
+            return
+        self.feedback.SetLabel(self._feedback_text)
+        self.feedback.Wrap(max(180, self.GetClientSize().width - 28))
+        self.feedback.SetMinSize((1, self.feedback.GetBestSize().height if self._feedback_text else 0))
+        self.Layout()
+        self.FitInside()
+
+    def _resize_feedback(self, event):
+        event.Skip()
+        wx.CallAfter(self._layout_feedback)
+
+    def _edited(self, event):
+        if self._feedback_text:
+            self._show_feedback('')
+        event.Skip()
 
     def _state(self):
         return (tuple(self.fields[key].GetValue() for key in METADATA), self.selected_status(),
@@ -97,6 +133,7 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         return self.snapshot is not None and self._baseline is not None and self._state() != self._baseline
 
     def clear(self, message: str):
+        self._show_feedback('')
         self.snapshot = None
         self._baseline = None
         for field in self.fields.values():
@@ -113,6 +150,8 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         self.Layout()
 
     def load(self, snapshot: Snapshot, values: dict[str, str], editor_major: int | None = None):
+        if self._feedback_root != snapshot.root:
+            self._show_feedback('')
         self.snapshot = snapshot
         self._loaded_values = dict(values)
         self._author_value = values['DESIGNER']
@@ -209,19 +248,28 @@ class ProjectSetupPanel(wx.lib.scrolledpanel.ScrolledPanel):
         self._submit(preview=False)
 
     def _submit(self, *, preview: bool):
+        root = self.snapshot.root if self.snapshot is not None else None
         self.preview_button.Disable()
         self.apply_button.Disable()
         try:
             plan = self.make_plan()
             if not plan.changes:
-                wx.MessageBox('Project setup is already up to date.', 'Project Setup', wx.OK | wx.ICON_INFORMATION, self)
+                self._show_feedback('No changes to save.', root=root)
                 return
             if preview:
                 with PreviewDialog(self, plan) as dialog:
                     if dialog.ShowModal() != wx.ID_OK:
                         return
             self.apply_plan(plan)
+            # The callback starts a refresh and clears the form. Set the outcome
+            # afterwards so it survives loading this same project's saved data.
+            self._show_feedback('Changes saved successfully.', root=root)
         except (SetupError, OSError) as exc:
+            self._show_feedback(f'Could not save changes: {exc}', error=True, root=root)
+            wx.MessageBox(str(exc), 'Project Setup', wx.OK | wx.ICON_ERROR, self)
+        except Exception as exc:
+            logging.getLogger(__name__).exception('Could not save project setup')
+            self._show_feedback(f'Could not save changes: {exc}', error=True, root=root)
             wx.MessageBox(str(exc), 'Project Setup', wx.OK | wx.ICON_ERROR, self)
         finally:
             self.preview_button.Enable(self.snapshot is not None)

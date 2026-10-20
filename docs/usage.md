@@ -57,6 +57,11 @@ Setup edits `definitions` metadata in `kibot_yaml/kibot_main.yaml` and the workf
 `REVIEWER` is added only when entered. Missing workflows are added through template
 review; workflow status stays unavailable until the file exists.
 
+After **Apply**, a green message confirms that changes were saved and remains
+visible after refresh. Save failures show a red message and an error dialog;
+your edits remain available to correct or retry. Editing a field clears the
+previous outcome. Applying unchanged values shows “No changes to save.”
+
 **DRAFT**, **PRELIMINARY** and **CHECKED** select the workflow’s documentation/check
 mode. Version tags control **RELEASED**. KiBot propagates metadata into text
 variables and reports on the next run. Saving setup does not run checks or

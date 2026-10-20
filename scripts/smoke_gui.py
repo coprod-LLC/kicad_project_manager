@@ -153,6 +153,21 @@ def main() -> int:
             assert (root / 'sample.kicad_pcb').read_bytes() == board_before
             panel.load(saved, saved.metadata, editor_major=9)
             assert panel.selected_kicad_major() == 10 and not panel.dirty
+            assert panel.feedback.GetLabel() == 'Changes saved successfully.'
+            panel.fields['PROJECT_NAME'].SetValue('Feedback regression')
+            assert not panel.feedback.GetLabel(), 'Editing must clear the previous outcome'
+            for failure in (OSError('Read-only project directory'), RuntimeError('Unexpected write failure')):
+                with patch('project_manager.setup_ui.apply', side_effect=failure), \
+                     patch('project_manager.setup_ui.wx.MessageBox') as message, \
+                     patch('project_manager.setup_ui.logging.getLogger'):
+                    panel._apply(None)
+                assert message.call_count == 1
+                assert str(failure) in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour().Get() == MISSING_COLOUR.Get()
+                assert read_setup(root) == saved, 'A failed save must not change files'
+                assert panel.apply_button.IsEnabled() and panel.dirty
+            panel.load(read_setup(project), read_setup(project).metadata, editor_major=9)
+            assert not panel.feedback.GetLabel(), 'Feedback from another project must be cleared'
         finally:
             panel.Destroy()
 
@@ -513,6 +528,27 @@ def main() -> int:
                 assert b'kibot_variant: CHECKED  # existing comment' in saved.workflow
                 assert not frame.setup_panel.dirty
                 assert not frame.setup_panel.make_plan().changes
+                panel = frame.setup_panel
+                assert panel.feedback.GetLabel() == 'Changes saved successfully.', 'Save result lost during refresh'
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
+                frame.notebook.SetSelection(1)
+                frame.Layout()
+                wx.YieldIfNeeded()
+                assert panel.feedback.GetScreenRect().bottom <= panel.GetScreenRect().bottom
+                capture(frame, args.output.with_name('setup-saved.png'))
+                panel.fields['PROJECT_NAME'].SetValue('')
+                assert not panel.feedback.GetLabel()
+                with patch('project_manager.setup_ui.wx.MessageBox') as message:
+                    panel._apply(None)
+                assert message.call_count == 1
+                assert 'Could not save changes' in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour().Get() == MISSING_COLOUR.Get()
+                assert read_setup(project) == saved
+                capture(frame, args.output.with_name('setup-error.png'))
+                panel.fields['PROJECT_NAME'].SetValue(saved.metadata['PROJECT_NAME'])
+                with patch('project_manager.setup_ui.wx.MessageBox', side_effect=AssertionError('Unexpected no-op popup')):
+                    panel._apply(None)
+                assert panel.feedback.GetLabel() == 'No changes to save.'
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 4
                 assert frame.backup_path == base / 'settings' / 'backups'
                 assert frame.backups_button.IsEnabled()
