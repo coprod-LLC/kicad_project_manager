@@ -22,7 +22,7 @@ import wx
 from project_manager.context import ContextError, ProjectContext
 from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame, _wrap_text
 from project_manager.setup import read_setup
-from project_manager.setup_ui import PreviewDialog
+from project_manager.setup_ui import PreviewDialog, ProjectSetupPanel
 from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
                                         TemplateReviewDialog, item_colour)
 from project_manager.templates import STATE, apply_upgrade, compare, load_template
@@ -133,6 +133,28 @@ def main() -> int:
             for index, item in enumerate(comparison.items):
                 assert item_colour(item).Get() == expected[item.path].Get()
                 assert dialog.files.GetItemTextColour(index).Get() == expected[item.path].Get()
+
+    def check_ci_version_migration():
+        print('GUI: checking KiCad 9 to 10 CI migration', flush=True)
+        root = sample_project(base / 'ci-migration')
+        snapshot = read_setup(root)
+        board_before = (root / 'sample.kicad_pcb').read_bytes()
+        applied = []
+        panel = ProjectSetupPanel(frame.notebook, applied.append, base / 'ci-settings')
+        try:
+            panel.load(snapshot, snapshot.metadata, editor_major=10)
+            assert panel.selected_kicad_major() == 10
+            assert not panel.dirty and panel.kicad_choice.IsEnabled()
+            assert 'CI currently uses KiCad 9' in panel.message.GetLabel()
+            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, panel.apply_button.GetId())
+            panel.apply_button.GetEventHandler().ProcessEvent(event)
+            saved = read_setup(root)
+            assert saved.kicad_major == 10 and len(applied) == 1
+            assert (root / 'sample.kicad_pcb').read_bytes() == board_before
+            panel.load(saved, saved.metadata, editor_major=9)
+            assert panel.selected_kicad_major() == 10 and not panel.dirty
+        finally:
+            panel.Destroy()
 
     def review_template():
         print('GUI: cancelling template review', flush=True)
@@ -452,6 +474,7 @@ def main() -> int:
                 assert frame.template_comparison.colour == 'red'
                 assert read_setup(project).workflow is None
                 check_result_colours()
+                check_ci_version_migration()
                 check_review_selection()
                 review_template()
                 phase = 31

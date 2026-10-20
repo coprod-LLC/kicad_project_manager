@@ -194,7 +194,7 @@ def canonical(path: str, data: bytes) -> bytes:
         value = _mask(value.encode(), 'definitions', METADATA)
     elif kind == 'workflow':
         workflow_block(value.encode())  # Check compatibility, not only the editable status.
-        value = _mask(value.encode(), 'env', ('kibot_variant',))
+        value = _mask(value.encode(), 'env', ('kibot_variant', 'kicad_version'))
     elif kind == 'release_variables':
         value, _ = release_entries(value)
     if kind in ('metadata', 'workflow', 'release_variables'):

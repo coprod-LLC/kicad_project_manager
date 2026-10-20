@@ -2,7 +2,7 @@
 
 ## Compatibility and sources
 
-KiCad 9 is supported. Project Setup and template review expect the KiBot layout
+KiCad 9 and 10 are supported. Project Setup and template review expect the KiBot layout
 described below; design rules and stackup features also work with saved KiCad 9
 projects without KiBot configuration. No particular organization’s template or
 catalog is required. Templates and standards are separate local folders or Git
@@ -53,7 +53,7 @@ whether the project matches. Commit the records in
 ## Project Setup
 
 Setup edits `definitions` metadata in `kibot_yaml/kibot_main.yaml` and the workflow’s
-`env.kibot_variant`. Authors share the existing `DESIGNER` field. An optional
+`env.kibot_variant` and **KiCad version for CI** (`env.kicad_version`). Authors share the existing `DESIGNER` field. An optional
 `REVIEWER` is added only when entered. Missing workflows are added through template
 review; workflow status stays unavailable until the file exists.
 
@@ -62,13 +62,19 @@ mode. Version tags control **RELEASED**. KiBot propagates metadata into text
 variables and reports on the next run. Saving setup does not run checks or
 establish that an electrical design has been verified.
 
+In a KiCad 10 editor, an existing KiCad 9 CI target is suggested as **KiCad 10**.
+The message identifies the mismatch; **Apply** saves the selected target into the
+workflow. Opening the plugin alone changes no files. A newer CI target is never
+automatically downgraded. Template updates preserve this project choice; use
+Project Setup to change it. Files saved with KiCad 10 need a KiCad 10 CI target.
+
 Existing values, scalar quoting, comments, newline conventions and branch policies
 are preserved where supported. Templates substitute metadata into multiple YAML
 contexts, so apostrophes, `colon: space`, comment sequences, macro expressions and
 ambiguous YAML scalars are rejected with an explanation. Multiline scalars and
 anchors on managed fields are unsupported. Unexpected layouts are rejected.
 
-Template comparison ignores allowed metadata values, workflow status and standard
+Template comparison ignores allowed metadata values, workflow status, CI KiCad version and standard
 numbered changelog title/body extraction entries; other shared configuration stays
 checked. When uncommenting release entries, align `- variable` with the other
 list entries and indent `command` two spaces further.

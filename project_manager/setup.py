@@ -69,6 +69,17 @@ class Snapshot:
     metadata: dict[str, str]
     status: str
 
+    @property
+    def kicad_major(self) -> int | None:
+        return int(workflow_block(self.workflow).values['kicad_version']) if self.workflow is not None else None
+
+
+def suggested_kicad_major(snapshot: Snapshot, editor_major: int | None = None) -> int | None:
+    current = snapshot.kicad_major
+    if current is not None and editor_major in SUPPORTED_MAJORS:
+        return max(current, editor_major)
+    return current
+
 
 def read_setup(root: Path) -> Snapshot:
     root = root.resolve(strict=True)
@@ -169,8 +180,11 @@ class Plan:
         )) for c in self.changes)
 
 
-def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
+def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str, *,
+            kicad_major: int | None = None) -> Plan:
     validate_metadata(metadata, snapshot.metadata)
+    if kicad_major is not None and kicad_major not in SUPPORTED_MAJORS:
+        raise SetupError('Choose KiCad 9 or 10 for CI.')
     changes = []
     config = metadata_block(snapshot.config).replace(metadata, prefer_plain=('REVIEWER',))
     if config != snapshot.config:
@@ -180,9 +194,14 @@ def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
         block = workflow_block(workflow)
         if status not in STATUSES and status != block.values['kibot_variant']:
             raise SetupError('Choose DRAFT, PRELIMINARY, or CHECKED. RELEASED is selected by version tags.')
-        updated = block.replace({'kibot_variant': status})
+        values = {'kibot_variant': status}
+        if kicad_major is not None:
+            values['kicad_version'] = str(kicad_major)
+        updated = block.replace(values)
         if updated != snapshot.workflow:
             changes.append(Change(WORKFLOW, snapshot.workflow, updated))
+    elif kicad_major is not None:
+        raise SetupError('Add the workflow through template review before selecting its KiCad version.')
     return Plan(snapshot, tuple(changes))
 
 

@@ -374,7 +374,7 @@ class ProjectManagerFrame(wx.Frame):
         if setup_result:
             snapshot, values, setup_error = setup_result
             if snapshot is not None:
-                self.setup_panel.load(snapshot, values)
+                self.setup_panel.load(snapshot, values, int(context.kicad_version.split('.')[0]))
             else:
                 self.setup_panel.clear(setup_error)
                 self._append_log(setup_error)

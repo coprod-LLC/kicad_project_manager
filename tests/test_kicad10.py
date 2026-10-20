@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 import unittest
 
 from project_manager.context import detect_context
-from project_manager.setup import apply, prepare, read_setup
+from project_manager.setup import apply, prepare, read_setup, suggested_kicad_major
 from project_manager.preferences import kicad_user_template_directory
 from project_manager.stackup_save import capture_saved_stackup, prepare_preset, save_preset
 from project_manager.standards import StandardsError, load_catalog
@@ -54,6 +54,63 @@ class KiCad10Tests(unittest.TestCase):
               self.root / 'settings')
         self.assertIn(b'kicad_version: 10', workflow.read_bytes())
         self.assertEqual(read_setup(folder).metadata['PROJECT_NAME'], 'KiCad 10 board')
+
+    def test_setup_migrates_ci_version_without_changing_design_or_branch_policy(self):
+        folder = sample_project(self.root / 'ci-migration')
+        workflow = folder / '.github/workflows/ci.yaml'
+        workflow.write_bytes(workflow.read_bytes().replace(b'kicad_version: 9', b'kicad_version: 9  # CI target'))
+        before = read_setup(folder)
+        design = {p: p.read_bytes() for p in folder.glob('*.kicad_*')}
+        plan = prepare(before, before.metadata, 'DRAFT', kicad_major=10)
+        self.assertEqual([change.relative for change in plan.changes], ['.github/workflows/ci.yaml'])
+        backup = apply(plan, self.root / 'settings')
+        saved = read_setup(folder)
+        self.assertEqual(saved.kicad_major, 10)
+        self.assertIn(b'# CI target', saved.workflow)
+        self.assertIn(b'branches: [dev]', saved.workflow)
+        self.assertEqual((backup / '.github/workflows/ci.yaml').read_bytes(), before.workflow)
+        self.assertEqual(design, {p: p.read_bytes() for p in design})
+        self.assertFalse(prepare(saved, saved.metadata, saved.status, kicad_major=10).changes)
+
+    def test_ci_version_suggestion_follows_newer_editor_without_automatic_downgrade(self):
+        from dataclasses import replace
+        snapshot = read_setup(sample_project(self.root / 'ci-suggestion'))
+        self.assertEqual(suggested_kicad_major(snapshot, 9), 9)
+        self.assertEqual(suggested_kicad_major(snapshot, 10), 10)
+        self.assertEqual(suggested_kicad_major(snapshot), 9)
+        newer = replace(snapshot, workflow=snapshot.workflow.replace(b'kicad_version: 9', b'kicad_version: 10'))
+        self.assertEqual(suggested_kicad_major(newer, 9), 10)
+        self.assertIsNone(suggested_kicad_major(replace(snapshot, workflow=None), 10))
+        self.assertEqual(read_setup(snapshot.root), snapshot)
+
+    def test_ci_migration_stays_matched_and_survives_another_template_apply(self):
+        template = template_folder(self.root / 'ci-template')
+        workflow = template.root / '.github/workflows/ci.yaml'
+        workflow.write_bytes(workflow.read_bytes().replace(b'kicad_version: 9', b'kicad_version: 10'))
+        template = release(template.root, '1.1.0')
+        project = self.root / 'ci-template-project'
+        shutil.copytree(template.root, project)
+        workflow = project / '.github/workflows/ci.yaml'
+        workflow.write_bytes(workflow.read_bytes().replace(b'kicad_version: 10', b"kicad_version: '9'"))
+        comparison = compare(project, template)
+        apply_upgrade(prepare_upgrade(comparison, {item.path: 'use' for item in comparison.items}), self.root / 'settings')
+        snapshot = read_setup(project)
+        apply(prepare(snapshot, snapshot.metadata, snapshot.status, kicad_major=10), self.root / 'settings')
+        comparison = compare(project, template)
+        item = next(item for item in comparison.items if item.path == '.github/workflows/ci.yaml')
+        self.assertEqual(item.status, 'Matches')
+        apply_upgrade(prepare_upgrade(comparison, {item.path: 'use' for item in comparison.items}), self.root / 'settings')
+        self.assertEqual(read_setup(project).kicad_major, 10)
+
+    def test_invalid_or_missing_ci_target_refuses_changes(self):
+        from dataclasses import replace
+        from project_manager.yaml_fields import SetupError
+        snapshot = read_setup(sample_project(self.root / 'ci-invalid'))
+        with self.assertRaisesRegex(SetupError, 'KiCad 9 or 10'):
+            prepare(snapshot, snapshot.metadata, snapshot.status, kicad_major=11)
+        with self.assertRaisesRegex(SetupError, 'Add the workflow'):
+            prepare(replace(snapshot, workflow=None), snapshot.metadata, snapshot.status, kicad_major=10)
+        self.assertEqual(read_setup(snapshot.root), snapshot)
 
     def test_template_default_follows_connected_version_and_document_override(self):
         self.assertEqual(kicad_user_template_directory({'XDG_DATA_HOME': '/data'}, 'linux', 10),
