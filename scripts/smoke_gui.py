@@ -153,7 +153,7 @@ def main() -> int:
             assert (root / 'sample.kicad_pcb').read_bytes() == board_before
             panel.load(saved, saved.metadata, editor_major=9)
             assert panel.selected_kicad_major() == 10 and not panel.dirty
-            assert panel.feedback.GetLabel() == 'Changes saved successfully.'
+            assert ' '.join(panel.feedback.GetLabel().split()) == 'Changes saved successfully.', repr(panel.feedback.GetLabel())
             panel.fields['PROJECT_NAME'].SetValue('Feedback regression')
             assert not panel.feedback.GetLabel(), 'Editing must clear the previous outcome'
             for failure in (OSError('Read-only project directory'), RuntimeError('Unexpected write failure')):
@@ -162,7 +162,7 @@ def main() -> int:
                      patch('project_manager.setup_ui.logging.getLogger'):
                     panel._apply(None)
                 assert message.call_count == 1
-                assert str(failure) in panel.feedback.GetLabel()
+                assert str(failure) in ' '.join(panel.feedback.GetLabel().split()), repr(panel.feedback.GetLabel())
                 assert panel.feedback.GetForegroundColour().Get() == MISSING_COLOUR.Get()
                 assert read_setup(root) == saved, 'A failed save must not change files'
                 assert panel.apply_button.IsEnabled() and panel.dirty
