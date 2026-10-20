@@ -222,7 +222,7 @@ def main() -> int:
         theme = 'kibot_resources/colors/theme.json'
         script = 'kibot_resources/scripts/helper.py'
         document = 'kibot_resources/templates/assembly_notes.txt'
-        missing = 'kibot_resources/fonts/font.ttf'
+        missing = 'Logos/white.png'
         (project / theme).write_text('{"theme": "project"}\n')
         (project / script).write_text('print("project override")\n')
         (project / document).write_text('Project notes\n')

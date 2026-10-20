@@ -22,9 +22,14 @@ files must be restored or published as a new version before use; **Details…**
 lists the affected paths. Downgrades and switching template identities are refused.
 
 The managed inventory covers KiBot YAML, `.github/workflows/ci.yaml`,
-`kibot_launch.sh`, drawing sheets in `Templates/`, and supported resources in
+`kibot_launch.sh`, all logos in `Logos/`, drawing sheets in `Templates/`, and supported resources in
 `kibot_resources/{fonts,colors,scripts,templates}`. Board, schematic, project
 settings, custom rules and extra project files are outside template upgrades.
+Logo checks include nested folders, text SVGs and binary image files. Missing
+files are reported even when project and installed template versions match;
+reviewing **Use template** copies them into the project. Changed project logos
+require review before replacement. Template maintainers must regenerate the
+manifest with a new template version after adding files.
 
 **Review adoption…** / **Review upgrade…** shows matches in green, differences in
 amber and missing files in red, with text labels. Matching files start at **Keep

@@ -22,6 +22,15 @@ MAX_SIZE = 32 * 1024 * 1024
 DOCUMENTS = {f'kibot_resources/templates/{name}.txt' for name in
              ('fabrication_notes', 'assembly_notes', 'impedance_table', 'readme')}
 VERSION = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
+# Keep ownership and recursive discovery together so a supported resource folder
+# cannot be silently omitted from the manifest or project comparison.
+RESOURCE_POLICIES = {
+    'Logos': 'binary',
+    'kibot_resources/fonts': 'binary',
+    'kibot_resources/colors': 'text',
+    'kibot_resources/scripts': 'text',
+    'kibot_resources/templates': 'text',
+}
 
 
 class TemplateSourceError(SetupError):
@@ -58,16 +67,16 @@ def policy(path: str) -> str:
         return 'text'
     if path.startswith('Templates/') and path.endswith('.kicad_wks'):
         return 'text'
-    for folder in ('fonts', 'colors', 'scripts', 'templates'):
-        if path.startswith(f'kibot_resources/{folder}/'):
-            return 'binary' if folder == 'fonts' else 'text'
+    for folder, kind in RESOURCE_POLICIES.items():
+        if path.startswith(folder + '/'):
+            # SVGs are text: retain readable diffs and portable Git newlines.
+            return 'text' if folder == 'Logos' and path.lower().endswith('.svg') else kind
     raise SetupError(f'This location cannot be managed by a template: {path}')
 
 
 def inventory(root: Path) -> list[str]:
     paths = []
-    for folder in ('kibot_yaml', 'Templates', 'kibot_resources/fonts', 'kibot_resources/colors',
-                   'kibot_resources/scripts', 'kibot_resources/templates'):
+    for folder in ('kibot_yaml', 'Templates', *RESOURCE_POLICIES):
         parent = project_path(root, folder)
         if not parent.exists():
             continue
