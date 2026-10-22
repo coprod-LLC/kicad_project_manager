@@ -35,8 +35,30 @@ Maintenance files under `meta/`, including `meta/tests/`, are outside the requir
 inventory. The plugin manages only `.github/workflows/ci.yaml`; optional workflows
 are neither installed nor updated. Existing local maintenance files are left alone.
 
-**Review adoption…** / **Review upgrade…** shows matches in green, differences in
-amber and missing files in red, with text labels. Matching files start at **Keep
+Templates can also manage `.gitignore` with these exact section markers:
+
+```gitignore
+### TEMPLATE IGNORE RULES (managed by Project Manager)
+# Shared patterns go here.
+### PROJECT IGNORE RULES (add your rules below)
+# Your additional patterns and !pattern overrides go here.
+```
+
+**Use template** updates only the shared section and preserves everything below
+the project marker. When adopting an older, unmarked project `.gitignore`, all
+its existing rules are retained in the project section for review. Later project
+rules can override shared rules; Git requires ignored parent folders to be
+re-included before their children. Older templates without these markers still
+work and do not manage `.gitignore`.
+
+Templates may also include root `LICENSE` as a reviewed document. It uses the
+same file list and **Keep project / Use template** actions as README sources and
+notes. Older manifests that did not manage this file remain supported. The
+licence text always comes from the selected template.
+
+**Review adoption…** / **Review upgrade…** shows matches in green, accepted custom
+documents in blue, differences needing review in amber and missing files in red,
+with text labels. Matching and accepted files start at **Keep
 project**; differences start at **Choose action…**. Shift-click selects a range;
 Ctrl-click adds individual files. The action list offers choices valid for the
 whole selection. **Keep project** accepts existing content, **Use template**
@@ -48,6 +70,28 @@ Select one project document to edit it. The four supported document sources are
 non-overlapping three-way merge proposals help reconcile incoming guidance.
 Keeping a document accepts that release’s baseline; kept shared-file differences
 continue to appear as local modifications.
+
+Choose **Keep project → Apply** to accept a custom document. The choice and
+reviewed template content are saved in `kibot_resources/project_manager/project.json`;
+commit this file with the project so the decision survives reopening and cloning
+on another computer. Accepted documents remain visible in blue with their diffs
+available. You can continue editing them without another warning. The overall
+status stays green and reports the accepted-customization count. When a later
+template changes that particular document, it becomes amber for another review;
+unrelated template updates do not invalidate your choice. Older accepted document
+records keep their previous behaviour when opened by this plugin.
+
+To change your mind, select a blue file and choose **Use template → Apply**.
+After an overwrite confirmation and backup, it returns to green. Later edits to
+that restored default need a new Keep decision. Editing a document in the review
+window and applying it also records an accepted customization. Shared automation
+files and the shared `.gitignore` section still flag differences even when kept.
+
+**Apply default README…** is a shortcut that replaces only
+`kibot_resources/templates/readme.txt`, after an overwrite warning, and keeps any
+other pending review choices. Its previous content is backed up. The next CI run
+regenerates root `README.md`; you can edit the source again afterwards. Missing
+README sources are still reported because KiBot needs the file to generate it.
 
 **Apply** saves directly and keeps review open with refreshed results. Repeat it
 for another batch. **Preview Apply…** shows the writes; accepting that preview

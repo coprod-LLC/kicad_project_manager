@@ -2,6 +2,15 @@ KiCad Project Manager v1.0.1
 
 - Prevent four GTK allocation warnings when opening Design Rules by sizing its
   nested notebooks before adding their pages. Settings and project files are unchanged.
+- Remember accepted document customizations in the project review record. Show
+  them in blue, keep the overall status green and request review when the
+  corresponding template default changes. Preserve existing review records.
+- Review template-provided LICENSE files through the standard Keep project /
+  Use template actions, with overwrite confirmation and local backups.
+- Add a confirmed shortcut to restore the installed README source, keeping
+  other pending review choices; CI regenerates the root README on its next run.
+- Update a template's shared .gitignore section while preserving project rules
+  and overrides below its project marker.
 
 KiCad Project Manager v1.0.0
 

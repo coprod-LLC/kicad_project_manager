@@ -23,13 +23,14 @@ from project_manager.context import ContextError, ProjectContext
 from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame, _wrap_text
 from project_manager.setup import read_setup
 from project_manager.setup_ui import PreviewDialog, ProjectSetupPanel
-from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
+from project_manager.template_ui import (CUSTOM_COLOUR, MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
                                         TemplateReviewDialog, item_colour)
-from project_manager.templates import STATE, apply_upgrade, compare, load_template
+from project_manager.templates import (LICENSE_FILE, README_SOURCE, STATE, apply_upgrade,
+                                       compare, load_template, prepare_upgrade)
 from project_manager.preferences import load_standards
 from project_manager.settings_ui import StandardsFolderDialog
 from tests.fixtures import sample_project
-from tests.test_templates import template_folder
+from tests.test_templates import release, template_folder
 from tests.standards_fixtures import RULES, detailed_catalog, saved_board
 
 
@@ -108,12 +109,19 @@ def main() -> int:
         coloured_project = sample_project(base / 'colour-project')
         config = coloured_project / 'kibot_yaml/kibot_main.yaml'
         config.write_bytes(config.read_bytes().replace(b'UNRELATED:', b'PROJECT_OVERRIDE:'))
+        source = load_template(template)
+        document = 'kibot_resources/templates/assembly_notes.txt'
+        (coloured_project / document).parent.mkdir(parents=True)
+        (coloured_project / document).write_text('Accepted project notes\n')
+        apply_upgrade(prepare_upgrade(compare(coloured_project, source), {document: 'keep'}),
+                      base / 'colour-backups')
         comparison = compare(coloured_project, load_template(template))
         expected = {item.path: (MISSING_COLOUR if item.current is None else
+                               CUSTOM_COLOUR if item.accepted else
                                MATCH_COLOUR if item.status == 'Matches' else MODIFIED_COLOUR)
                     for item in comparison.items}
         assert set(colour.Get() for colour in expected.values()) == {
-            MATCH_COLOUR.Get(), MODIFIED_COLOUR.Get(), MISSING_COLOUR.Get()}
+            MATCH_COLOUR.Get(), CUSTOM_COLOUR.Get(), MODIFIED_COLOUR.Get(), MISSING_COLOUR.Get()}
         with TemplateDetailsDialog(frame, comparison) as dialog:
             def inspect_details(dialog=dialog):
                 try:
@@ -140,6 +148,83 @@ def main() -> int:
             for index, item in enumerate(comparison.items):
                 assert item_colour(item).Get() == expected[item.path].Get()
                 assert dialog.files.GetItemTextColour(index).Get() == expected[item.path].Get()
+
+    def check_default_readme():
+        print('GUI: checking confirmed README reset and preservation of pending choices', flush=True)
+        source = template_folder(base / 'readme-template')
+        root = base / 'readme-project'
+        shutil.copytree(source.root, root)
+        target = root / README_SOURCE
+        target.write_text('My custom board README source\n')
+        (root / 'README.md').write_text('Generated README stays unchanged until CI\n')
+        comparison = compare(root, source)
+        assert comparison.colour == 'amber'
+        with TemplateReviewDialog(frame, comparison,
+                                  apply_plan=lambda plan: apply_upgrade(plan, base / 'readme-backups')) as dialog:
+            assert dialog.default_readme_button.IsEnabled()
+            pending = 'kibot_resources/templates/assembly_notes.txt'
+            dialog.choices[pending] = 'edit'
+            dialog.edits[pending] = b'Unsaved assembly notes\n'
+            before = target.read_bytes()
+            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO) as warning:
+                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.default_readme_button.GetId())
+                dialog.default_readme_button.GetEventHandler().ProcessEvent(event)
+                assert warning.call_count == 1
+                assert 'next CI run will overwrite README.md' in warning.call_args[0][0]
+                assert warning.call_args[0][2] & wx.NO_DEFAULT
+            assert target.read_bytes() == before and not dialog.applied
+            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.YES):
+                dialog.default_readme_button.GetEventHandler().ProcessEvent(event)
+            assert target.read_bytes() == source.files[README_SOURCE]
+            assert dialog.choices[pending] == 'edit'
+            assert dialog.edits[pending] == b'Unsaved assembly notes\n'
+            assert (root / pending).read_bytes() == source.files[pending]
+            assert (root / 'README.md').read_text() == 'Generated README stays unchanged until CI\n'
+            assert dialog.comparison.colour == 'green'
+            assert 'Changes applied' in dialog.feedback.GetLabel()
+            assert list((base / 'readme-backups').rglob('readme.txt'))
+
+    def check_accepted_license():
+        print('GUI: checking blue licence choice after reopen, then confirmed restore', flush=True)
+        source = template_folder(base / 'license-template')
+        (source.root / LICENSE_FILE).write_text('Template licence\n')
+        source = release(source.root, '1.1.0')
+        root = base / 'license-project'
+        shutil.copytree(source.root, root)
+        target = root / LICENSE_FILE
+        target.write_text('My project licence\n')
+        storage = base / 'license-backups'
+        with TemplateReviewDialog(frame, compare(root, source),
+                                  apply_plan=lambda plan: apply_upgrade(plan, storage)) as dialog:
+            dialog.choices[LICENSE_FILE] = 'keep'
+            dialog._apply(None)
+            assert next(item for item in dialog.comparison.items if item.path == LICENSE_FILE).accepted
+        # Create a new dialog from the files on disk, without reusing its choices.
+        with TemplateReviewDialog(frame, compare(root, load_template(source.root)),
+                                  apply_plan=lambda plan: apply_upgrade(plan, storage)) as dialog:
+            index = next(i for i, item in enumerate(dialog.comparison.items) if item.path == LICENSE_FILE)
+            for row in dialog._selected_indices():
+                dialog.files.Select(row, False)
+            dialog.files.Select(index)
+            dialog._refresh_selection()
+            assert dialog.files.GetItemTextColour(index).Get() == CUSTOM_COLOUR.Get()
+            assert dialog.choices[LICENSE_FILE] == 'keep'
+            assert 'My project licence' in dialog.diff.GetValue()
+            assert dialog.comparison.colour == 'green'
+            assert '1 accepted customization' in dialog.intro.GetLabel()
+            assert 'use' in dialog.actions
+            dialog.action.SetSelection(dialog.actions.index('use'))
+            dialog._action_changed(None)
+            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO) as warning:
+                dialog._apply(None)
+                assert LICENSE_FILE in warning.call_args[0][0]
+            assert target.read_text() == 'My project licence\n'
+            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.YES):
+                dialog._apply(None)
+            assert target.read_text() == 'Template licence\n'
+            assert dialog.files.GetItemTextColour(index).Get() == MATCH_COLOUR.Get()
+            assert 'Matches installed template' in dialog.intro.GetLabel()
+            assert list(storage.rglob(LICENSE_FILE))
 
     def check_ci_version_migration():
         print('GUI: checking KiCad 9 to 10 CI migration', flush=True)
@@ -497,6 +582,8 @@ def main() -> int:
                 assert read_setup(project).workflow is None
                 check_result_colours()
                 check_ci_version_migration()
+                check_default_readme()
+                check_accepted_license()
                 check_review_selection()
                 review_template()
                 phase = 31
@@ -505,7 +592,8 @@ def main() -> int:
                 assert b'kibot_variant: DRAFT  # existing comment' in saved.workflow
                 assert (project / STATE).is_file()
                 assert frame.template_comparison.colour == 'green'
-                assert 'Matches installed template' in frame.template_status.GetLabel()
+                assert 'Up to date' in frame.template_status.GetLabel()
+                assert '1 accepted customization' in frame.template_status.GetLabel()
                 assert frame.template_status.GetForegroundColour().Get() == FOUND_COLOUR.Get()
                 assert (project / 'kibot_resources/fonts/font.ttf').is_file()
                 assert (project / 'kibot_resources/templates/assembly_notes.txt').read_text() == 'Project-specific assembly notes\n'

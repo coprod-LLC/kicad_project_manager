@@ -34,6 +34,12 @@ the PCM package. For manual clone/symlink setup, see [development installation](
 In **Review upgrade…**, Shift-click a range or Ctrl-click individual files, then
 choose an action for the selection. **Apply**, beside **Preview Apply…**, saves
 directly and keeps the review window open. Undecided files stay pending.
+**Apply default README…** resets `readme.txt` after confirmation; the next CI run
+regenerates `README.md`. Accepted custom documents appear blue and keep the overall
+status green. **Keep project → Apply** remembers the choice in the project's
+review record; **Use template** restores the default after confirmation and backup.
+For templates with a managed `.gitignore`, updates preserve the project section
+at the end, including `!pattern` overrides.
 
 Save the project and close PCB/schematic editors before **applying standards**;
 reopen afterward. Changes use local backups and reject intervening edits. Template

@@ -21,6 +21,11 @@ STATE = 'kibot_resources/project_manager/project.json'
 MAX_SIZE = 32 * 1024 * 1024
 DOCUMENTS = {f'kibot_resources/templates/{name}.txt' for name in
              ('fabrication_notes', 'assembly_notes', 'impedance_table', 'readme')}
+README_SOURCE = 'kibot_resources/templates/readme.txt'
+LICENSE_FILE = 'LICENSE'
+ACCEPTED = 'Accepted customization'
+IGNORE_SHARED = '### TEMPLATE IGNORE RULES (managed by Project Manager)'
+IGNORE_USER = '### PROJECT IGNORE RULES (add your rules below)'
 VERSION = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
 # Keep ownership and recursive discovery together so a supported resource folder
 # cannot be silently omitted from the manifest or project comparison.
@@ -59,10 +64,12 @@ def policy(path: str) -> str:
         return 'workflow'
     if path == 'kibot_yaml/kibot_pre_set_text_variables.yaml':
         return 'release_variables'
-    if path in DOCUMENTS:
+    if path in DOCUMENTS or path == LICENSE_FILE:
         return 'document'
     if path == 'kibot_launch.sh':
         return 'text'
+    if path == '.gitignore':
+        return 'ignore_rules'
     if path.startswith('kibot_yaml/') and path.endswith(('.yaml', '.yml')):
         return 'text'
     if path.startswith('Templates/') and path.endswith('.kicad_wks'):
@@ -74,7 +81,7 @@ def policy(path: str) -> str:
     raise SetupError(f'This location cannot be managed by a template: {path}')
 
 
-def inventory(root: Path) -> list[str]:
+def inventory(root: Path, *, include_license: bool = False) -> list[str]:
     # Only project automation belongs in the required-file manifest. KiCad's
     # template-only meta/ tree (including maintenance tests) stays outside it;
     # WORKFLOW below names the single production CI file, not every workflow.
@@ -98,6 +105,14 @@ def inventory(root: Path) -> list[str]:
     for path in (WORKFLOW, 'kibot_launch.sh'):
         if project_path(root, path).exists():
             paths.append(path)
+    if include_license and project_path(root, LICENSE_FILE).exists():
+        paths.append(LICENSE_FILE)
+    ignore = read_file(root, '.gitignore', MAX_SIZE)
+    # Older releases did not manage their root .gitignore. Opt in with explicit
+    # section markers so those existing manifests remain valid without rewriting.
+    if ignore is not None and (IGNORE_SHARED in text(ignore) or IGNORE_USER in text(ignore)):
+        split_ignore_rules(text(ignore), required=True)
+        paths.append('.gitignore')
     return sorted(paths)
 
 
@@ -106,6 +121,20 @@ def text(data: bytes) -> str:
         return data.decode('utf-8-sig').replace('\r\n', '\n')
     except UnicodeError as exc:
         raise SetupError('Managed text files must use UTF-8 encoding.') from exc
+
+
+def split_ignore_rules(value: str, required: bool = False) -> tuple[str, str]:
+    """Separate the enforced prefix from project rules; accept legacy projects."""
+    lines = value.splitlines(True)
+    markers = [line.rstrip('\n') for line in lines]
+    if IGNORE_SHARED not in markers and IGNORE_USER not in markers and not required:
+        return '', value
+    if (not markers or markers[0] != IGNORE_SHARED or markers.count(IGNORE_SHARED) != 1
+            or markers.count(IGNORE_USER) != 1):
+        raise SetupError('.gitignore must start with the template-rules marker and contain exactly '
+                         'one project-rules marker. Keep your own rules below the project marker.')
+    boundary = markers.index(IGNORE_USER) + 1
+    return ''.join(lines[:boundary]), ''.join(lines[boundary:])
 
 
 def digest(data: bytes) -> str:
@@ -209,6 +238,8 @@ def canonical(path: str, data: bytes) -> bytes:
         value = _mask(value.encode(), 'env', ('kibot_variant', 'kicad_version'))
     elif kind == 'release_variables':
         value, _ = release_entries(value)
+    elif kind == 'ignore_rules':
+        value, _ = split_ignore_rules(value)
     if kind in ('metadata', 'workflow', 'release_variables'):
         # Comments and blank lines may surround project-owned fields/entries.
         value = shared_yaml_lines(value)
@@ -235,6 +266,10 @@ def adapted(path: str, incoming: bytes, current: bytes | None) -> bytes:
                 raise SetupError('Cannot locate the changelog insertion point in the selected template.')
             value = value[:marker.start()] + entries + '\n' + value[marker.start():]
         incoming = value.encode('utf-8')
+    elif kind == 'ignore_rules':
+        shared, _ = split_ignore_rules(text(incoming), required=True)
+        _, project_rules = split_ignore_rules(text(current))
+        incoming = (shared + project_rules).encode('utf-8')
     if kind != 'binary':
         # Retain the project's newline convention for replaced text files.
         value = text(incoming)
@@ -279,7 +314,7 @@ class Template:
 def build_manifest(root: Path, identity: str, version: str) -> bytes:
     version_tuple(version)
     files = {}
-    for relative in inventory(root):
+    for relative in inventory(root, include_license=True):
         data = read_file(root, relative, MAX_SIZE)
         canonical(relative, data)
         files[relative] = {'policy': policy(relative), 'sha256': source_hash(relative, data)}
@@ -301,7 +336,9 @@ def load_template(root: Path) -> Template:
         raise SetupError('Template manifest must contain 1–1000 managed files.')
     if CONFIG not in entries or WORKFLOW not in entries:
         raise SetupError('Template manifest must include KiBot configuration and its workflow.')
-    installed = set(inventory(root))
+    # Root licences in older template releases were outside the managed list.
+    # Include them only when the source manifest explicitly opts in.
+    installed = set(inventory(root, include_license=LICENSE_FILE in entries))
     if installed != set(entries):
         details = [f'The installed file list no longer matches template version {manifest["template_version"]}.']
         details.extend(f'Missing or renamed file: {path}' for path in sorted(set(entries) - installed))
@@ -373,6 +410,10 @@ class Item:
     base: dict | None
     merged: bytes | None = None
 
+    @property
+    def accepted(self) -> bool:
+        return self.status == ACCEPTED
+
     def diff(self) -> str:
         if policy(self.path) == 'binary':
             return (f'{self.path}\n\nProject SHA256: {digest(self.current) if self.current is not None else "missing"}'
@@ -394,7 +435,11 @@ class Comparison:
 
     @property
     def problems(self) -> tuple[Item, ...]:
-        return tuple(item for item in self.items if item.status not in ('Matches', 'Project content preserved'))
+        return tuple(item for item in self.items if item.status not in ('Matches', ACCEPTED))
+
+    @property
+    def customizations(self) -> tuple[Item, ...]:
+        return tuple(item for item in self.items if item.accepted)
 
     @property
     def colour(self) -> str:
@@ -417,6 +462,9 @@ class Comparison:
             status = 'Local modifications / review needed'
         elif not self.version:
             status = 'Matches installed files · Review adoption'
+        elif self.customizations:
+            count = len(self.customizations)
+            status = f'Up to date · {count} accepted customization' + ('s' if count != 1 else '')
         else:
             status = 'Matches installed template'
         return prefix + ' · ' + status
@@ -454,6 +502,8 @@ def compare(root: Path, template: Template) -> Comparison:
                 raise SetupError(f'Missing document baseline for {relative}.')
             if policy(relative) == 'document' and digest(base['content'].encode()) != base['hash']:
                 raise SetupError(f'Document baseline hash mismatch for {relative}.')
+            if 'choice' in base and (policy(relative) != 'document' or base['choice'] not in ('keep', 'use', 'edit')):
+                raise SetupError(f'Invalid recorded document choice for {relative}.')
         incoming = adapted(relative, data, current)
         merged = None
         expected_hash = digest(canonical(relative, incoming if policy(relative) == 'workflow' else data))
@@ -464,7 +514,12 @@ def compare(root: Path, template: Template) -> Comparison:
             status, action = 'Matches', 'keep'
         elif policy(relative) == 'document':
             if base and base['hash'] == expected_hash:
-                status, action = 'Project content preserved', 'keep'
+                if base.get('choice', 'keep') in ('keep', 'edit'):
+                    # Older records already accepted document edits against
+                    # this baseline. Preserve those decisions on migration.
+                    status, action = ACCEPTED, 'keep'
+                else:
+                    status, action = 'Project document changed; review needed', 'review'
             elif base and current_hash == base['hash']:
                 status, action = 'Template changed; project unchanged', 'use'
             else:
@@ -478,7 +533,7 @@ def compare(root: Path, template: Template) -> Comparison:
         else:
             status, action = 'Local modifications; review before replacement', 'review'
         items.append(Item(relative, status, current, incoming, action, base, merged))
-    extras = tuple(p for p in inventory(root) if p not in template.files)
+    extras = tuple(p for p in inventory(root, include_license=LICENSE_FILE in template.files) if p not in template.files)
     return Comparison(root, template, version, manifest_before, state_before, tuple(items), extras)
 
 
@@ -539,6 +594,10 @@ def prepare_upgrade(comparison: Comparison, choices: dict[str, str], edits: dict
         files[item.path] = {'policy': policy(item.path), 'hash': digest(canonical(item.path, data))}
         if policy(item.path) == 'document':
             files[item.path]['content'] = text(data)
+            # A matching document follows the default. Keep/edit of differing
+            # content accepts further project edits against this source hash.
+            files[item.path]['choice'] = ('use' if canonical(item.path, after) == canonical(item.path, data)
+                                          else choice)
     template = comparison.template
     state = json_bytes({'schema_version': 1, 'template_id': template.identity,
                         'template_version': template.version, 'files': files})
@@ -561,6 +620,7 @@ def apply_upgrade(plan: Upgrade, storage: Path | None = None, verify=None) -> Pa
                                *((item.path, item.current) for item in comparison.items)):
             if read_file(comparison.root, path, MAX_SIZE) != original:
                 raise SetupError(f'{path} changed during review. Refresh and review again.')
-        if tuple(p for p in inventory(comparison.root) if p not in template.files) != comparison.extras:
+        if tuple(p for p in inventory(comparison.root, include_license=LICENSE_FILE in template.files)
+                 if p not in template.files) != comparison.extras:
             raise SetupError('The project file inventory changed during review. Refresh and review again.')
     return commit_changes(comparison.root, plan.changes, storage, limit=MAX_SIZE, verify=unchanged)

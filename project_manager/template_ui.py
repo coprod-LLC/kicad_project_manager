@@ -6,10 +6,12 @@ from typing import Callable
 import wx
 
 from .setup_ui import PreviewDialog
-from .templates import Comparison, Item, Upgrade, apply_upgrade, compare, policy, prepare_upgrade, text
+from .templates import (README_SOURCE, Comparison, Item, Upgrade, apply_upgrade, compare,
+                        policy, prepare_upgrade, text)
 from .yaml_fields import SetupError
 
 MATCH_COLOUR = wx.Colour(46, 170, 80)
+CUSTOM_COLOUR = wx.Colour(65, 135, 210)
 MODIFIED_COLOUR = wx.Colour(220, 160, 50)
 MISSING_COLOUR = wx.Colour(220, 70, 70)
 
@@ -17,7 +19,9 @@ MISSING_COLOUR = wx.Colour(220, 70, 70)
 def item_colour(item: Item) -> wx.Colour:
     if item.current is None:
         return MISSING_COLOUR
-    return MATCH_COLOUR if item.status in ('Matches', 'Project content preserved') else MODIFIED_COLOUR
+    if item.accepted:
+        return CUSTOM_COLOUR
+    return MATCH_COLOUR if item.status == 'Matches' else MODIFIED_COLOUR
 
 
 class TemplateReviewDialog(wx.Dialog):
@@ -26,7 +30,7 @@ class TemplateReviewDialog(wx.Dialog):
         super().__init__(parent, title='Review Template Upgrade', size=(1000, 760),
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.comparison = comparison
-        self.choices = {item.path: 'keep' if item.status in ('Matches', 'Project content preserved') else 'review'
+        self.choices = {item.path: 'keep' if item.status == 'Matches' or item.accepted else 'review'
                         for item in comparison.items}
         self.edits: dict[str, bytes] = {item.path: item.merged for item in comparison.items if item.merged is not None}
         self.selected = -1
@@ -38,6 +42,9 @@ class TemplateReviewDialog(wx.Dialog):
         self.intro = wx.StaticText(self, label=self._intro())
         self.intro.Wrap(930)
         layout.Add(self.intro, 0, wx.EXPAND | wx.ALL, 12)
+        legend = wx.StaticText(self, label='Green: matches  ·  Blue: accepted customization  ·  '
+                                         'Amber: review needed  ·  Red: missing file')
+        layout.Add(legend, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
         self.files = wx.ListCtrl(self, style=wx.LC_REPORT, size=(-1, 210))
         for index, (label, width) in enumerate((('File', 470), ('Comparison', 310), ('Action', 140))):
             self.files.InsertColumn(index, label, width=width)
@@ -75,6 +82,12 @@ class TemplateReviewDialog(wx.Dialog):
         self.feedback = wx.StaticText(self, label='')
         layout.Add(self.feedback, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 12)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.default_readme_button = wx.Button(self, label='Apply default README…')
+        self.default_readme_button.Enable(README_SOURCE in comparison.template.files)
+        self.default_readme_button.SetToolTip(
+            'Replace readme.txt with the installed default. The next CI run regenerates README.md.')
+        self.default_readme_button.Bind(wx.EVT_BUTTON, self._default_readme)
+        buttons.Add(self.default_readme_button, 0, wx.RIGHT, 8)
         buttons.AddStretchSpacer()
         buttons.Add(wx.Button(self, wx.ID_CANCEL, 'Close'))
         self.preview_button = wx.Button(self, wx.ID_OK, 'Preview Apply…')
@@ -97,7 +110,9 @@ class TemplateReviewDialog(wx.Dialog):
                 'Shift-click to select a range; Ctrl-click to select individual files. '
                 'Files left at “Choose action…” stay unchanged. Apply saves and keeps this window open. '
                 'Metadata, release history and workflow status are preserved. '
-                'Keeping project documentation accepts your content for this template release. '
+                'Shared ignore rules are updated without changing the project section. '
+                'Keep project accepts custom documents until their template default changes. '
+                'Use template restores a default; accepted files remain available in this list. '
                 'Shared-file modifications remain visible after applying.')
 
     @staticmethod
@@ -202,6 +217,8 @@ class TemplateReviewDialog(wx.Dialog):
 
     def _preview(self, event):
         try:
+            if not self._confirm_documents(self.choices):
+                return
             plan = prepare_upgrade(self.comparison, self.choices, self.edits)
             deferred = sum(self.choices[item.path] == 'review' for item in self.comparison.items)
             with PreviewDialog(self, plan, title='Apply Template Changes',
@@ -216,15 +233,39 @@ class TemplateReviewDialog(wx.Dialog):
             wx.MessageBox(str(exc), 'Template upgrade', wx.OK | wx.ICON_ERROR, self)
 
     def _apply(self, event):
+        self._apply_choices(dict(self.choices))
+
+    def _confirm_documents(self, choices):
+        replacements = [item.path for item in self.comparison.items
+                        if choices.get(item.path) == 'use' and policy(item.path) == 'document'
+                        and item.current is not None and item.current != item.incoming]
+        if not replacements:
+            return True
+        message = ('Replace these project documents with the installed template defaults?\n\n'
+                   + '\n'.join(replacements) + '\n\nYour current files will be backed up.')
+        if README_SOURCE in replacements:
+            message += (' The next CI run will overwrite README.md using this default. '
+                        'You can edit readme.txt again afterwards.')
+        return wx.MessageBox(
+            message, 'Use template documents', wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING, self) == wx.YES
+
+    def _default_readme(self, event):
+        # Apply only this source file, leaving other pending review choices alone.
+        self._apply_choices({README_SOURCE: 'use'})
+
+    def _apply_choices(self, choices):
         try:
-            plan = prepare_upgrade(self.comparison, self.choices, self.edits)
+            if not self._confirm_documents(choices):
+                return
+            plan = prepare_upgrade(self.comparison, choices, self.edits)
             backup = self._apply_plan(plan)
             self.applied = True
             # Refresh against the reviewed source snapshot. The next apply still
             # verifies the source and every project file before writing.
             comparison = compare(self.comparison.root, self.comparison.template)
-            pending_edits = {path: data for path, data in self.edits.items() if self.choices[path] == 'review'}
-            self.choices = {item.path: 'review' if self.choices[item.path] == 'review' else 'keep'
+            pending_edits = {path: data for path, data in self.edits.items()
+                             if choices.get(path, 'review') == 'review'}
+            self.choices = {item.path: self.choices[item.path] if choices.get(item.path, 'review') == 'review' else 'keep'
                             for item in comparison.items}
             self.edits = {item.path: item.merged for item in comparison.items if item.merged is not None}
             self.edits.update(pending_edits)

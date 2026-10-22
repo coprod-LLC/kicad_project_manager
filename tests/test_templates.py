@@ -255,6 +255,9 @@ class TemplateTests(unittest.TestCase):
         path = sorted(DOCUMENTS)[0]
         project_document = self.project / path
         project_document.write_text('My project documentation\n')
+        # A document following the default needs one explicit Keep decision
+        # before subsequent project edits count as accepted customizations.
+        apply_upgrade(prepare_upgrade(self.inspect(), {path: 'keep'}), self.storage)
         self.assertFalse(self.inspect().problems)
         (self.template.root / path).write_text('New company guidance\n')
         self.template = release(self.template.root, '1.1.0')
