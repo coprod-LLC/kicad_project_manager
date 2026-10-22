@@ -17,7 +17,7 @@ rules and PCB stackups. Use your own compatible templates and standards folders.
    Open the plugin from its toolbar button or **Tools → External Plugins**.
 
 Alternatively, install the packaged ZIP from [Releases](https://github.com/coprod-LLC/kicad_project_manager/releases).
-Version **1.0.0** is a stable release for KiCad 9 and 10. When upgrading from a
+Version **1.0.1** is a stable release for KiCad 9 and 10. When upgrading from a
 previous package identity, uninstall that copy first; the package ID is
 `org.kicadprojectmanager.plugin`. Unlink source installations before installing
 the PCM package. For manual clone/symlink setup, see [development installation](docs/development.md#development-installation).

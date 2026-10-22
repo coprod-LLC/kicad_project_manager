@@ -77,6 +77,8 @@ jobs:
   gui:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      G_DEBUG: fatal-warnings
     steps:
       - uses: actions/checkout@v4
       - name: Install native GUI test dependencies

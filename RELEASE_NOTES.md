@@ -1,3 +1,8 @@
+KiCad Project Manager v1.0.1
+
+- Prevent four GTK allocation warnings when opening Design Rules by sizing its
+  nested notebooks before adding their pages. Settings and project files are unchanged.
+
 KiCad Project Manager v1.0.0
 
 - First stable PCM release, supporting KiCad 9 and 10 on Linux, macOS and Windows.

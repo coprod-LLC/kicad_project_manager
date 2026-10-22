@@ -57,7 +57,7 @@ session token automatically. Diagnostics contain local paths.
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v1.0.0
+python -m scripts.build_release --tag v1.0.1
 python -m scripts.validate_package --schemas /usr/share/kicad/schemas
 python -m scripts.smoke_gui --output .dev/gui.png
 python -m scripts.smoke_stackup_save --output .dev/save-preset
