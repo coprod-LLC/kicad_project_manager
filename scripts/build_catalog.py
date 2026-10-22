@@ -85,14 +85,15 @@ def write_catalog(package: dict, destination: Path, base_url: str, timestamp: in
     (destination / "repository.json").write_bytes(json_bytes(repository))
     feed_url = html.escape(base_url.rstrip("/") + "/repository.json")
     version = html.escape(package["versions"][0]["version"])
+    status = html.escape(package["versions"][0]["status"])
     homepage = html.escape(package["resources"]["homepage"], quote=True)
     (destination / "index.html").write_text(
         '<!doctype html><html lang="en"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>KiCad Project Manager</title><body style="font:18px system-ui;max-width:780px;margin:4em auto;padding:1em">'
         '<h1>KiCad Project Manager</h1>'
-        '<p>A project companion for KiCad 9. Review template updates, edit KiBot metadata, and apply reusable rules and stackups.</p>'
-        f'<p>Latest packaged version: <strong>{version}</strong> (testing).</p>'
+        '<p>A project companion for KiCad 9 and 10. Review template updates, edit KiBot metadata, and apply reusable rules and stackups.</p>'
+        f'<p>Latest packaged version: <strong>{version}</strong> ({status}).</p>'
         '<p>In KiCad’s Plugin and Content Manager, choose Manage and add this repository URL:</p>'
         f'<p><a href="{feed_url}">{feed_url}</a></p>'
         f'<p><a href="{homepage}">Documentation and source</a></p>'

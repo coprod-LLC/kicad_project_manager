@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 from .preferences import data_directory
+from .compat import SUPPORTED_MAJORS
 from .yaml_fields import ScalarBlock, SetupError
 
 METADATA = ('PROJECT_NAME', 'BOARD_NAME', 'COMPANY', 'DESIGNER', 'REVIEWER', 'GIT_URL', 'LOGO')
@@ -55,8 +56,8 @@ def workflow_block(data: bytes) -> ScalarBlock:
     block = ScalarBlock(data, 'env', ('kibot_variant', 'kibot_config', 'kicad_version'))
     if block.values['kibot_config'].removeprefix('./') != CONFIG:
         raise SetupError(f'This workflow does not use {CONFIG}. Its configuration is unsupported.')
-    if block.values['kicad_version'] != '9':
-        raise SetupError('This workflow targets a different KiCad version. Select a KiCad 9 template.')
+    if block.values['kicad_version'] not in {str(major) for major in SUPPORTED_MAJORS}:
+        raise SetupError('This workflow must target KiCad 9 or 10.')
     return block
 
 
@@ -67,6 +68,17 @@ class Snapshot:
     workflow: bytes | None
     metadata: dict[str, str]
     status: str
+
+    @property
+    def kicad_major(self) -> int | None:
+        return int(workflow_block(self.workflow).values['kicad_version']) if self.workflow is not None else None
+
+
+def suggested_kicad_major(snapshot: Snapshot, editor_major: int | None = None) -> int | None:
+    current = snapshot.kicad_major
+    if current is not None and editor_major in SUPPORTED_MAJORS:
+        return max(current, editor_major)
+    return current
 
 
 def read_setup(root: Path) -> Snapshot:
@@ -168,8 +180,11 @@ class Plan:
         )) for c in self.changes)
 
 
-def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
+def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str, *,
+            kicad_major: int | None = None) -> Plan:
     validate_metadata(metadata, snapshot.metadata)
+    if kicad_major is not None and kicad_major not in SUPPORTED_MAJORS:
+        raise SetupError('Choose KiCad 9 or 10 for CI.')
     changes = []
     config = metadata_block(snapshot.config).replace(metadata, prefer_plain=('REVIEWER',))
     if config != snapshot.config:
@@ -179,9 +194,14 @@ def prepare(snapshot: Snapshot, metadata: dict[str, str], status: str) -> Plan:
         block = workflow_block(workflow)
         if status not in STATUSES and status != block.values['kibot_variant']:
             raise SetupError('Choose DRAFT, PRELIMINARY, or CHECKED. RELEASED is selected by version tags.')
-        updated = block.replace({'kibot_variant': status})
+        values = {'kibot_variant': status}
+        if kicad_major is not None:
+            values['kicad_version'] = str(kicad_major)
+        updated = block.replace(values)
         if updated != snapshot.workflow:
             changes.append(Change(WORKFLOW, snapshot.workflow, updated))
+    elif kicad_major is not None:
+        raise SetupError('Add the workflow through template review before selecting its KiCad version.')
     return Plan(snapshot, tuple(changes))
 
 

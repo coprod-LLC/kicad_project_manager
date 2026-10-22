@@ -14,7 +14,7 @@ import unicodedata
 import uuid
 
 from .sexpr import atoms
-from .standards import (Catalog, StandardsError, _embedded_stackup, _one, _root,
+from .standards import (Catalog, StandardsError, _board_major, _embedded_stackup, _one, _root,
                         _stackup_data, _string, load_catalog)
 from .standards_apply import FILE_LIMIT, _copper_names, _decode, _read_bytes
 from .stackup import PhysicalStackup, _physical_key, board_stackup_from_text, parse_stackup, validate_metadata
@@ -25,6 +25,7 @@ class CapturedStackup:
     board: Path
     board_hash: str
     physical: PhysicalStackup
+    kicad_major: int = 9
 
 
 @dataclass(frozen=True)
@@ -64,15 +65,14 @@ def capture_saved_stackup(board: Path) -> CapturedStackup:
         raise StandardsError('Save the board in KiCad first.')
     text, _bom = _decode(data, board.name)
     top = _root(text, 'kicad_pcb')
-    if atoms(_one(top, 'version')) != ['version', '20241229']:
-        raise StandardsError('Saving stackup presets requires the KiCad 9 board format (20241229).')
+    major = _board_major(text)
     physical = board_stackup_from_text(text).physical
     if physical is None:
         raise StandardsError('Configure the physical stackup in Board Setup and save the board first.')
     derived, _layers = _stackup_data(physical.native)
     if _copper_names(_one(top, 'layers')) != [row['layer'] for row in derived['copper']]:
         raise StandardsError('The saved physical stackup disagrees with the enabled copper layers. Fix it in KiCad and save again.')
-    return CapturedStackup(board.resolve(strict=True), _hash(data), physical)
+    return CapturedStackup(board.resolve(strict=True), _hash(data), physical, major)
 
 
 def _identity(value: str | None) -> str:
@@ -141,6 +141,8 @@ def _signature(catalog: Catalog) -> tuple:
 
 def prepare_preset(capture: CapturedStackup, catalog: Catalog, metadata: dict,
                    *, preset_id: str | None = None) -> SavePresetPlan:
+    if capture.kicad_major not in catalog.kicad_majors:
+        raise StandardsError(f'This catalog has not been qualified for KiCad {capture.kicad_major}.')
     metadata = dict(metadata)
     allowed = {'name', 'manufacturer', 'manufacturer_stackup_id', 'nominal_thickness_mm',
                'finished_thickness_mm', 'manufacturer_compression_thickness_mm',
@@ -172,7 +174,7 @@ def prepare_preset(capture: CapturedStackup, catalog: Catalog, metadata: dict,
     evidence = {'captured_on': date.today().isoformat()}
     if metadata.get('source_url'):
         evidence['source_page'] = metadata['source_url']
-    document = {'schema_version': 1, 'kicad_major': 9, 'id': preset_id,
+    document = {'schema_version': 1, 'kicad_major': capture.kicad_major, 'id': preset_id,
                 'manufacturer_recommended': None, 'preferred': False, **metadata,
                 'source_evidence': evidence, 'stackup': capture.physical.native.splitlines()}
     text = json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + '\n'

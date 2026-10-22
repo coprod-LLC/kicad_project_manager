@@ -50,6 +50,10 @@ def release(root: Path, version='1.0.0'):
 
 def template_folder(root: Path):
     sample_project(root)
+    logos = root / 'Logos'
+    logos.mkdir()
+    (logos / 'white.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg">\n</svg>\n')
+    (logos / 'white.png').write_bytes(b'\x89PNG\r\n\x1a\n\x00\xffLOGO')
     resources = root / 'kibot_resources'
     (resources / 'fonts').mkdir(parents=True)
     (resources / 'fonts/font.ttf').write_bytes(b'\x00\xffFONT')
@@ -91,6 +95,34 @@ class TemplateTests(unittest.TestCase):
         self.assertFalse(comparison.problems)
         self.assertFalse((self.project / STATE).exists())
 
+    def test_maintenance_tests_and_optional_workflow_are_never_managed(self):
+        tests = self.template.root / 'meta/tests'
+        tests.mkdir(parents=True)
+        (tests / 'check_workflow.py').write_text('print("maintenance only")\n')
+        (tests / 'example.kicad_pcb.txt').write_text('example board\n')
+        (tests / 'kicad-port-trial.yaml').write_text('name: Optional test\n')
+        optional = '.github/workflows/kicad-port-trial.yaml'
+        # A developer can enable the secondary workflow without changing the
+        # production manifest. The plugin never installs it into PCB projects.
+        (self.template.root / optional).write_text('name: Enabled template test\n')
+        original_paths = set(self.template.files)
+        self.template = release(self.template.root, '1.1.0')
+        self.assertEqual(set(self.template.files), original_paths)
+        self.assertFalse(self.inspect().problems)
+        self.adopt()
+        self.assertFalse((self.project / 'meta').exists())
+        self.assertFalse((self.project / optional).exists())
+
+        # A manually installed workflow and local test files remain untouched.
+        local_tests = self.project / 'meta/tests'
+        local_tests.mkdir(parents=True)
+        (local_tests / 'check_workflow.py').write_text('local maintenance edits\n')
+        (self.project / optional).write_text('name: My optional workflow\n')
+        self.assertFalse(self.inspect().problems)
+        self.adopt()
+        self.assertEqual((local_tests / 'check_workflow.py').read_text(), 'local maintenance edits\n')
+        self.assertEqual((self.project / optional).read_text(), 'name: My optional workflow\n')
+
     def test_metadata_quoting_line_endings_history_and_status_are_preserved(self):
         original = (self.project / CONFIG).read_bytes()
         values = {key: f'Project {key}' for key in METADATA}
@@ -121,6 +153,73 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(comparison.colour, 'red')
         self.assertEqual(len(comparison.problems), 2)
         self.assertIn('Missing required files', comparison.summary)
+
+    def test_version_match_does_not_hide_missing_svg_or_binary_logo(self):
+        for path in ('Logos/white.svg', 'Logos/white.png'):
+            (self.project / path).unlink()
+        comparison = self.inspect()
+        self.assertEqual(comparison.version, self.template.version)
+        self.assertEqual(comparison.colour, 'red')
+        self.assertEqual({item.path for item in comparison.problems},
+                         {'Logos/white.svg', 'Logos/white.png'})
+        self.assertTrue(all(item.status == 'Missing required file' and item.suggested == 'use'
+                            for item in comparison.problems))
+        self.adopt()
+        for path in ('Logos/white.svg', 'Logos/white.png'):
+            self.assertEqual((self.project / path).read_bytes(), self.template.files[path])
+        self.assertFalse(self.inspect().problems)
+        self.assertFalse(self.adopt().changes)
+
+    def test_missing_files_are_detected_in_every_managed_family(self):
+        for path, original in self.template.files.items():
+            with self.subTest(path=path):
+                target = self.project / path
+                target.unlink()
+                try:
+                    comparison = self.inspect()
+                    self.assertEqual(comparison.colour, 'red')
+                    self.assertEqual([item.path for item in comparison.problems], [path])
+                    self.assertEqual(comparison.problems[0].status, 'Missing required file')
+                finally:
+                    target.write_bytes(original)
+
+    def test_new_nested_logo_is_detected_and_copied_on_upgrade(self):
+        self.adopt()
+        path = 'Logos/dark/new.png'
+        target = self.template.root / path
+        target.parent.mkdir()
+        target.write_bytes(b'\x89PNG\r\n\x1a\n\x00\xffNEW')
+        self.template = release(self.template.root, '1.1.0')
+        item = next(item for item in self.inspect().problems if item.path == path)
+        self.assertEqual(item.status, 'Missing required file')
+        self.assertEqual(item.suggested, 'use')
+        self.adopt()
+        self.assertEqual((self.project / path).read_bytes(), target.read_bytes())
+        self.assertFalse(self.inspect().problems)
+
+    def test_project_logo_changes_require_review_and_replacement_is_backed_up(self):
+        self.adopt()
+        path = 'Logos/white.png'
+        custom = b'\x89PNG\r\n\x1a\n\x00\xffCUSTOM'
+        (self.project / path).write_bytes(custom)
+        comparison = self.inspect()
+        item = next(item for item in comparison.problems if item.path == path)
+        self.assertEqual(item.suggested, 'review')
+        self.assertIn('Project SHA256:', item.diff())
+        self.assertIn('Template SHA256:', item.diff())
+        apply_upgrade(prepare_upgrade(comparison, {path: 'keep'}), self.storage)
+        self.assertEqual((self.project / path).read_bytes(), custom)
+        plan = prepare_upgrade(self.inspect(), {path: 'use'})
+        self.assertIn('replace binary file', plan.diff())
+        backup = apply_upgrade(plan, self.storage)
+        self.assertEqual((backup / path).read_bytes(), custom)
+        self.assertEqual((self.project / path).read_bytes(), self.template.files[path])
+
+    def test_unpublished_new_logo_invalidates_installed_template(self):
+        (self.template.root / 'Logos/new.svg').write_text('<svg/>\n')
+        with self.assertRaisesRegex(SetupError, 'Installed template files were added, removed or renamed') as error:
+            load_template(self.template.root)
+        self.assertIn('Logos/new.svg', str(error.exception))
 
     def test_reviewer_preserved_when_upgrading_a_legacy_template(self):
         config = self.template.root / CONFIG

@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 
 from .sexpr import atoms, forms
+from .compat import SUPPORTED_MAJORS, BOARD_FORMAT_MAJORS
 
 
 class StandardsError(ValueError):
@@ -31,6 +32,7 @@ class Catalog:
     name: str
     rules: tuple[Preset, ...]
     stackups: tuple[Preset, ...]
+    kicad_majors: tuple[int, ...] = (9,)
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,25 @@ def _root(text: str, expected: str) -> dict:
     return _children(nodes[0][1])
 
 
+def _board_major(text: str) -> int:
+    version = atoms(_one(_root(text, 'kicad_pcb'), 'version'))
+    if len(version) != 2 or version[1] not in BOARD_FORMAT_MAJORS:
+        raise StandardsError('Only the KiCad 9 (20241229) and KiCad 10 (20260206) board formats are supported.')
+    return BOARD_FORMAT_MAJORS[version[1]]
+
+
+def _target_majors(data: dict) -> tuple[int, ...]:
+    major = data.get('kicad_major')
+    if type(major) is not int or major not in SUPPORTED_MAJORS:
+        raise StandardsError('Standards must target KiCad 9 or 10.')
+    targets = data.get('compatible_kicad_majors', [major])
+    if (not isinstance(targets, list) or not targets or major not in targets
+            or any(type(value) is not int or value not in SUPPORTED_MAJORS for value in targets)
+            or len(set(targets)) != len(targets)):
+        raise StandardsError('compatible_kicad_majors must list unique supported majors and include kicad_major.')
+    return tuple(targets)
+
+
 def _constraints(text: str) -> dict:
     data = _json(text)
     try:
@@ -217,8 +238,7 @@ def _embedded_stackup(entry: dict, source: tuple[str, str]) -> tuple[dict, dict]
         raise StandardsError('Stackup presets have no review status; remove status from this document.')
     if type(entry.get('schema_version')) is not int or entry['schema_version'] != 1:
         raise StandardsError('Stackup documents must use schema_version 1.')
-    if type(entry.get('kicad_major')) is not int or entry['kicad_major'] != 9:
-        raise StandardsError('Stackup documents must target KiCad 9.')
+    targets = _target_majors(entry)
     derived_fields = {'copper_layer_count', 'board_thickness_mm', 'copper',
                       'stackup_file', 'copper_layers_file', 'preset_file'}
     if derived_fields.intersection(entry):
@@ -232,6 +252,7 @@ def _embedded_stackup(entry: dict, source: tuple[str, str]) -> tuple[dict, dict]
     native = '\n'.join(lines) + '\n'
     derived, copper = _stackup_data(native)
     details = {key: value for key, value in entry.items() if key != 'stackup'}
+    details['compatible_kicad_majors'] = list(targets)
     details.update(derived, preset_file=relative)
     return details, {'stackup_file': native, 'copper_layers_file': copper, 'preset_file': text}
 
@@ -243,8 +264,7 @@ def load_catalog(folder: Path) -> Catalog:
         version = data.get('schema_version')
         if type(version) is not int or version != 2:
             raise StandardsError('This plugin requires catalog schema_version 2 with self-contained stackup documents.')
-        if type(data.get('kicad_major')) is not int or data['kicad_major'] != 9:
-            raise StandardsError('Choose a catalog for KiCad 9.')
+        targets = _target_majors(data)
         name = _string(data.get('name'), 'Catalog name')
         if 'stackups' in data:
             raise StandardsError('Catalog schema_version 2 discovers stackups/*.json recursively; remove the stackups list.')
@@ -269,12 +289,15 @@ def load_catalog(folder: Path) -> Catalog:
                 if kind == 'stackups':
                     try:
                         details, files = _embedded_stackup(entry, documents[index][1:])
+                        if not set(details['compatible_kicad_majors']).issubset(targets):
+                            raise StandardsError('Stackup compatibility must be included in the catalog compatibility.')
                     except StandardsError as exc:
                         raise StandardsError(f'{documents[index][2]}: {exc}') from exc
                 else:
                     keys = ('custom_rules_file', 'constraints_file')
                     files = {key: _file(root, entry.get(key)) for key in keys}
                     details = dict(entry)
+                    details['compatible_kicad_majors'] = list(targets)
                 from .stackup import validate_metadata, stackup_label
                 validate_metadata(details)
                 if kind == 'rules':
@@ -300,7 +323,7 @@ def load_catalog(folder: Path) -> Catalog:
             groups[kind] = tuple(presets)
         if not groups['rules'] and not groups['stackups']:
             raise StandardsError('The catalog has no presets.')
-        return Catalog(root, name, groups['rules'], groups['stackups'])
+        return Catalog(root, name, groups['rules'], groups['stackups'], targets)
     except StandardsError:
         raise
     except (OSError, ValueError, IndexError, KeyError, TypeError) as exc:

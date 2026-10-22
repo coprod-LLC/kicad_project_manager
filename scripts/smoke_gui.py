@@ -20,9 +20,9 @@ if sys.platform == "linux" and os.environ.get("DISPLAY"):
 import wx
 
 from project_manager.context import ContextError, ProjectContext
-from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame
+from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame, _wrap_text
 from project_manager.setup import read_setup
-from project_manager.setup_ui import PreviewDialog
+from project_manager.setup_ui import PreviewDialog, ProjectSetupPanel
 from project_manager.template_ui import (MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
                                         TemplateReviewDialog, item_colour)
 from project_manager.templates import STATE, apply_upgrade, compare, load_template
@@ -74,6 +74,14 @@ def main() -> int:
     failures = []
     phase = 0
     logged_phase = None
+    wrap_widths = {}
+
+    def measured_wrap(control, value, width):
+        wrapped = _wrap_text(control, value, width)
+        wrap_widths[control.GetId()] = (width, max((control.GetTextExtent(line).width
+                                                  for line in wrapped.splitlines()), default=0))
+        return wrapped
+
     source_script = template / 'kibot_resources/scripts/helper.py'
     source_script_before = source_script.read_bytes()
     small_status_height = 0
@@ -103,12 +111,16 @@ def main() -> int:
             def inspect_details(dialog=dialog):
                 try:
                     contents = dialog.results.GetValue()
+                    capture(dialog, args.output.with_name('template-details-colours.png'))
                     for item in comparison.items:
                         offset = contents.index(f'{item.status}: {item.path}')
                         style = wx.TextAttr()
-                        assert dialog.results.GetStyle(offset, style), item.path
-                        assert style.GetTextColour() == expected[item.path], item.path
-                    capture(dialog, args.output.with_name('template-details-colours.png'))
+                        assert dialog.results.GetStyle(offset, style), f'No style at {offset}: {item.path}'
+                        actual = style.GetTextColour()
+                        # Cocoa can return an NSColor with identical RGBA but
+                        # different native colour-space identity.
+                        assert actual.Get() == expected[item.path].Get(), (
+                            f'{item.path}: actual={actual.Get()}, expected={expected[item.path].Get()}')
                 except Exception as exc:
                     failures.append(f'Details colors: {exc}')
                 finally:
@@ -119,8 +131,45 @@ def main() -> int:
         assert not failures
         with TemplateReviewDialog(frame, comparison) as dialog:
             for index, item in enumerate(comparison.items):
-                assert item_colour(item) == expected[item.path]
-                assert dialog.files.GetItemTextColour(index) == expected[item.path]
+                assert item_colour(item).Get() == expected[item.path].Get()
+                assert dialog.files.GetItemTextColour(index).Get() == expected[item.path].Get()
+
+    def check_ci_version_migration():
+        print('GUI: checking KiCad 9 to 10 CI migration', flush=True)
+        root = sample_project(base / 'ci-migration')
+        snapshot = read_setup(root)
+        board_before = (root / 'sample.kicad_pcb').read_bytes()
+        applied = []
+        panel = ProjectSetupPanel(frame.notebook, applied.append, base / 'ci-settings')
+        try:
+            panel.load(snapshot, snapshot.metadata, editor_major=10)
+            assert panel.selected_kicad_major() == 10
+            assert not panel.dirty and panel.kicad_choice.IsEnabled()
+            assert 'CI currently uses KiCad 9' in panel.message.GetLabel()
+            event = wx.CommandEvent(wx.EVT_BUTTON.typeId, panel.apply_button.GetId())
+            panel.apply_button.GetEventHandler().ProcessEvent(event)
+            saved = read_setup(root)
+            assert saved.kicad_major == 10 and len(applied) == 1
+            assert (root / 'sample.kicad_pcb').read_bytes() == board_before
+            panel.load(saved, saved.metadata, editor_major=9)
+            assert panel.selected_kicad_major() == 10 and not panel.dirty
+            assert ' '.join(panel.feedback.GetLabel().split()) == 'Changes saved successfully.', repr(panel.feedback.GetLabel())
+            panel.fields['PROJECT_NAME'].SetValue('Feedback regression')
+            assert not panel.feedback.GetLabel(), 'Editing must clear the previous outcome'
+            for failure in (OSError('Read-only project directory'), RuntimeError('Unexpected write failure')):
+                with patch('project_manager.setup_ui.apply', side_effect=failure), \
+                     patch('project_manager.setup_ui.wx.MessageBox') as message, \
+                     patch('project_manager.setup_ui.logging.getLogger'):
+                    panel._apply(None)
+                assert message.call_count == 1
+                assert str(failure) in ' '.join(panel.feedback.GetLabel().split()), repr(panel.feedback.GetLabel())
+                assert panel.feedback.GetForegroundColour().Get() == MISSING_COLOUR.Get()
+                assert read_setup(root) == saved, 'A failed save must not change files'
+                assert panel.apply_button.IsEnabled() and panel.dirty
+            panel.load(read_setup(project), read_setup(project).metadata, editor_major=9)
+            assert not panel.feedback.GetLabel(), 'Feedback from another project must be cleared'
+        finally:
+            panel.Destroy()
 
     def review_template():
         print('GUI: cancelling template review', flush=True)
@@ -173,7 +222,7 @@ def main() -> int:
         theme = 'kibot_resources/colors/theme.json'
         script = 'kibot_resources/scripts/helper.py'
         document = 'kibot_resources/templates/assembly_notes.txt'
-        missing = 'kibot_resources/fonts/font.ttf'
+        missing = 'Logos/white.png'
         (project / theme).write_text('{"theme": "project"}\n')
         (project / script).write_text('print("project override")\n')
         (project / document).write_text('Project notes\n')
@@ -338,7 +387,11 @@ def main() -> int:
         buttons = frame.template_details_button.GetScreenRect()
         assert status.y + status.height <= buttons.y, 'Template status overlaps buttons'
         for line in frame.template_status.GetLabel().splitlines():
-            assert frame.template_status.GetTextExtent(line).width <= status.width, 'Template status clips horizontally'
+            width = frame.template_status.GetTextExtent(line).width
+            assert width <= status.width, (
+                f'Template status clips horizontally: {width} > {status.width}; '
+                f'client={frame.template_status.GetClientSize()}, '
+                f'wrapped_at={wrap_widths.get(frame.template_status.GetId())}: {line!r}')
 
     def assert_header_layout():
         refresh = frame.refresh_button.GetScreenRect()
@@ -436,6 +489,7 @@ def main() -> int:
                 assert frame.template_comparison.colour == 'red'
                 assert read_setup(project).workflow is None
                 check_result_colours()
+                check_ci_version_migration()
                 check_review_selection()
                 review_template()
                 phase = 31
@@ -445,7 +499,7 @@ def main() -> int:
                 assert (project / STATE).is_file()
                 assert frame.template_comparison.colour == 'green'
                 assert 'Matches installed template' in frame.template_status.GetLabel()
-                assert frame.template_status.GetForegroundColour() == FOUND_COLOUR
+                assert frame.template_status.GetForegroundColour().Get() == FOUND_COLOUR.Get()
                 assert (project / 'kibot_resources/fonts/font.ttf').is_file()
                 assert (project / 'kibot_resources/templates/assembly_notes.txt').read_text() == 'Project-specific assembly notes\n'
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 2
@@ -474,6 +528,27 @@ def main() -> int:
                 assert b'kibot_variant: CHECKED  # existing comment' in saved.workflow
                 assert not frame.setup_panel.dirty
                 assert not frame.setup_panel.make_plan().changes
+                panel = frame.setup_panel
+                assert panel.feedback.GetLabel() == 'Changes saved successfully.', 'Save result lost during refresh'
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
+                frame.notebook.SetSelection(1)
+                frame.Layout()
+                wx.YieldIfNeeded()
+                assert panel.feedback.GetScreenRect().bottom <= panel.GetScreenRect().bottom
+                capture(frame, args.output.with_name('setup-saved.png'))
+                panel.fields['PROJECT_NAME'].SetValue('')
+                assert not panel.feedback.GetLabel()
+                with patch('project_manager.setup_ui.wx.MessageBox') as message:
+                    panel._apply(None)
+                assert message.call_count == 1
+                assert 'Could not save changes' in panel.feedback.GetLabel()
+                assert panel.feedback.GetForegroundColour().Get() == MISSING_COLOUR.Get()
+                assert read_setup(project) == saved
+                capture(frame, args.output.with_name('setup-error.png'))
+                panel.fields['PROJECT_NAME'].SetValue(saved.metadata['PROJECT_NAME'])
+                with patch('project_manager.setup_ui.wx.MessageBox', side_effect=AssertionError('Unexpected no-op popup')):
+                    panel._apply(None)
+                assert panel.feedback.GetLabel() == 'No changes to save.'
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 4
                 assert frame.backup_path == base / 'settings' / 'backups'
                 assert frame.backups_button.IsEnabled()
@@ -589,7 +664,7 @@ def main() -> int:
                     return
                 assert panel.feedback.IsShown()
                 assert 'KiCad still has this project open' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MODIFIED_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MODIFIED_COLOUR.Get()
                 assert std_board.read_bytes() == before[std_board]
                 frame.SetSize((860, 640))
                 phase = 806
@@ -614,7 +689,7 @@ def main() -> int:
                 assert len(panel.selected_stackup.stack.copper) == 6
                 assert panel.current_stackup.stack.impedance_controlled
                 assert 'Stackup applied' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
                 assert 'Example Fab · EX0616' in panel.current_stackup.title.GetLabel()
                 assert 'settings differ' not in panel.current_stackup.title.GetLabel()
                 assert not panel.capture_button.IsShown(), 'Applying a catalog stackup must hide Save as preset'
@@ -630,7 +705,7 @@ def main() -> int:
                     wx.CallLater(100, check)
                     return
                 assert 'already applied' in panel.feedback.GetLabel()
-                assert panel.feedback.GetForegroundColour() == MATCH_COLOUR
+                assert panel.feedback.GetForegroundColour().Get() == MATCH_COLOUR.Get()
                 assert all(p.read_bytes() == data for p, data in before.items())
                 assert len(list((base / 'settings').rglob('manifest.json'))) == 6
                 phase = 9
@@ -643,7 +718,7 @@ def main() -> int:
                 assert frame.template_comparison is None
                 assert 'Installed template modified' in frame._template_status_text
                 assert 'manifest' not in frame.template_status.GetLabel().lower()
-                assert frame.template_status.GetForegroundColour() == MISSING_COLOUR
+                assert frame.template_status.GetForegroundColour().Get() == MISSING_COLOUR.Get()
                 assert frame.template_details_button.IsEnabled()
                 assert not frame.template_review_button.IsEnabled()
                 with patch('project_manager.ui.show_text_details') as details:
@@ -678,13 +753,18 @@ def main() -> int:
         except Exception as exc:
             traceback.print_exc()
             failures.append(str(exc) or type(exc).__name__)
+            try:
+                capture(frame, args.output.with_name('gui-failure.png'))
+            except Exception:
+                traceback.print_exc()
             frame.Destroy()
 
     wx.CallLater(250, check)
     # The phase timeout cannot fire while a failed callback leaves a modal dialog
     # open. Bound the entire event loop and print thread stacks on a stuck test.
     faulthandler.dump_traceback_later(45, exit=True)
-    app.MainLoop()
+    with patch('project_manager.ui._wrap_text', side_effect=measured_wrap):
+        app.MainLoop()
     faulthandler.cancel_dump_traceback_later()
     temporary.cleanup()
     if failures:

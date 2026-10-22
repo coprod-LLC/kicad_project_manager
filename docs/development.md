@@ -8,10 +8,11 @@ installation and the [usage guide](usage.md) for everyday operation.
 ```sh
 git clone https://github.com/coprod-LLC/kicad_project_manager.git
 cd kicad_project_manager
-python3 scripts/install_dev.py
+python3 scripts/install_dev.py --kicad-major 10
 ```
 
-The helper links this checkout into KiCad 9’s IPC `plugins/` folder and refuses
+Use `--kicad-major 9` for KiCad 9. The helper links only this checkout into the
+selected KiCad major’s IPC `plugins/` folder and refuses
 to replace an existing installation. Uninstall PCM copies first, including
 packages with earlier identities. Use `--plugins-dir` for a custom location.
 On Windows, enable Developer Mode for symlinks or copy the complete checkout.
@@ -20,14 +21,26 @@ system. PCB Editor’s **Open Plugin Directory** command can open that older fol
 
 | Platform | Default plugin directory |
 | --- | --- |
-| Linux | `~/.local/share/kicad/9.0/plugins/` |
-| macOS | `~/Documents/KiCad/9.0/plugins/` |
-| Windows | `%USERPROFILE%\Documents\KiCad\9.0\plugins\` |
+| Linux | `~/.local/share/kicad/10.0/plugins/` |
+| macOS | `~/Documents/KiCad/10.0/plugins/` |
+| Windows | `%USERPROFILE%\Documents\KiCad\10.0\plugins\` |
+
+Replace `10.0` with `9.0` for KiCad 9. `KICAD_DOCUMENTS_HOME` can override the
+base directory. To link manually on macOS, from the checkout:
+
+```sh
+mkdir -p "$HOME/Documents/KiCad/10.0/plugins"
+ln -s "$PWD" "$HOME/Documents/KiCad/10.0/plugins/kicad_project_manager"
+```
+
+Use the Linux path from the table for a Linux symlink. Neither method installs
+templates, standards, libraries or other plugins; choose local sources in Overview.
 
 Restart PCB Editor after installation or a `plugin.json` change. For ordinary
 Python edits, close and relaunch the plugin. Dependency changes require
-**Recreate Plugin Environment** in Preferences → Plugins. Linux uses a system
-Python with pip, venv and distro wxPython; do not pip-build wxPython.
+**Recreate Plugin Environment** in Preferences → Plugins. macOS, Windows and Linux
+AppImage installations use KiCad's bundled Python. Native Linux packages use a
+system Python with pip, venv and distro wxPython; do not pip-build wxPython.
 
 IDE launches must supply the intended editor endpoint explicitly:
 
@@ -44,7 +57,7 @@ session token automatically. Diagnostics contain local paths.
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v0.7.0
+python -m scripts.build_release --tag v1.0.0
 python -m scripts.validate_package --schemas /usr/share/kicad/schemas
 python -m scripts.smoke_gui --output .dev/gui.png
 python -m scripts.smoke_stackup_save --output .dev/save-preset
@@ -92,9 +105,10 @@ managed source as a new version; published versions are immutable.
 ## Releases
 
 Update `project_manager/__init__.py` and `RELEASE_NOTES.md` in a reviewed commit.
-After Checks pass, tag that commit `vMAJOR.MINOR.PATCH` and push the tag. The
+After Checks pass and the change is merged into main, tag the main commit
+`vMAJOR.MINOR.PATCH` and push the tag. The
 release workflow builds the explicit public-file allowlist, validates official
-KiCad schemas, publishes immutable prerelease assets and rebuilds the PCM feed.
+KiCad schemas, publishes immutable stable release assets and rebuilds the PCM feed.
 Enable GitHub Pages with **GitHub Actions** as its source and permit release-tag
 deployments to the `github-pages` environment. A failed deployment can be retried
 with the workflow’s manual tag input; existing assets are never overwritten.

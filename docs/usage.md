@@ -2,7 +2,7 @@
 
 ## Compatibility and sources
 
-KiCad 9 is supported. Project Setup and template review expect the KiBot layout
+KiCad 9 and 10 are supported. Project Setup and template review expect the KiBot layout
 described below; design rules and stackup features also work with saved KiCad 9
 projects without KiBot configuration. No particular organization’s template or
 catalog is required. Templates and standards are separate local folders or Git
@@ -22,9 +22,18 @@ files must be restored or published as a new version before use; **Details…**
 lists the affected paths. Downgrades and switching template identities are refused.
 
 The managed inventory covers KiBot YAML, `.github/workflows/ci.yaml`,
-`kibot_launch.sh`, drawing sheets in `Templates/`, and supported resources in
+`kibot_launch.sh`, all logos in `Logos/`, drawing sheets in `Templates/`, and supported resources in
 `kibot_resources/{fonts,colors,scripts,templates}`. Board, schematic, project
 settings, custom rules and extra project files are outside template upgrades.
+Logo checks include nested folders, text SVGs and binary image files. Missing
+files are reported even when project and installed template versions match;
+reviewing **Use template** copies them into the project. Changed project logos
+require review before replacement. Template maintainers must regenerate the
+manifest with a new template version after adding files.
+
+Maintenance files under `meta/`, including `meta/tests/`, are outside the required
+inventory. The plugin manages only `.github/workflows/ci.yaml`; optional workflows
+are neither installed nor updated. Existing local maintenance files are left alone.
 
 **Review adoption…** / **Review upgrade…** shows matches in green, differences in
 amber and missing files in red, with text labels. Matching files start at **Keep
@@ -53,14 +62,25 @@ whether the project matches. Commit the records in
 ## Project Setup
 
 Setup edits `definitions` metadata in `kibot_yaml/kibot_main.yaml` and the workflow’s
-`env.kibot_variant`. Authors share the existing `DESIGNER` field. An optional
+`env.kibot_variant` and **KiCad version for CI** (`env.kicad_version`). Authors share the existing `DESIGNER` field. An optional
 `REVIEWER` is added only when entered. Missing workflows are added through template
 review; workflow status stays unavailable until the file exists.
+
+After **Apply**, a green message confirms that changes were saved and remains
+visible after refresh. Save failures show a red message and an error dialog;
+your edits remain available to correct or retry. Editing a field clears the
+previous outcome. Applying unchanged values shows “No changes to save.”
 
 **DRAFT**, **PRELIMINARY** and **CHECKED** select the workflow’s documentation/check
 mode. Version tags control **RELEASED**. KiBot propagates metadata into text
 variables and reports on the next run. Saving setup does not run checks or
 establish that an electrical design has been verified.
+
+In a KiCad 10 editor, an existing KiCad 9 CI target is suggested as **KiCad 10**.
+The message identifies the mismatch; **Apply** saves the selected target into the
+workflow. Opening the plugin alone changes no files. A newer CI target is never
+automatically downgraded. Template updates preserve this project choice; use
+Project Setup to change it. Files saved with KiCad 10 need a KiCad 10 CI target.
 
 Existing values, scalar quoting, comments, newline conventions and branch policies
 are preserved where supported. Templates substitute metadata into multiple YAML
@@ -68,7 +88,7 @@ contexts, so apostrophes, `colon: space`, comment sequences, macro expressions a
 ambiguous YAML scalars are rejected with an explanation. Multiline scalars and
 anchors on managed fields are unsupported. Unexpected layouts are rejected.
 
-Template comparison ignores allowed metadata values, workflow status and standard
+Template comparison ignores allowed metadata values, workflow status, CI KiCad version and standard
 numbered changelog title/body extraction entries; other shared configuration stays
 checked. When uncommenting release entries, align `- variable` with the other
 list entries and indent `command` two spaces further.

@@ -22,6 +22,15 @@ MAX_SIZE = 32 * 1024 * 1024
 DOCUMENTS = {f'kibot_resources/templates/{name}.txt' for name in
              ('fabrication_notes', 'assembly_notes', 'impedance_table', 'readme')}
 VERSION = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
+# Keep ownership and recursive discovery together so a supported resource folder
+# cannot be silently omitted from the manifest or project comparison.
+RESOURCE_POLICIES = {
+    'Logos': 'binary',
+    'kibot_resources/fonts': 'binary',
+    'kibot_resources/colors': 'text',
+    'kibot_resources/scripts': 'text',
+    'kibot_resources/templates': 'text',
+}
 
 
 class TemplateSourceError(SetupError):
@@ -58,16 +67,19 @@ def policy(path: str) -> str:
         return 'text'
     if path.startswith('Templates/') and path.endswith('.kicad_wks'):
         return 'text'
-    for folder in ('fonts', 'colors', 'scripts', 'templates'):
-        if path.startswith(f'kibot_resources/{folder}/'):
-            return 'binary' if folder == 'fonts' else 'text'
+    for folder, kind in RESOURCE_POLICIES.items():
+        if path.startswith(folder + '/'):
+            # SVGs are text: retain readable diffs and portable Git newlines.
+            return 'text' if folder == 'Logos' and path.lower().endswith('.svg') else kind
     raise SetupError(f'This location cannot be managed by a template: {path}')
 
 
 def inventory(root: Path) -> list[str]:
+    # Only project automation belongs in the required-file manifest. KiCad's
+    # template-only meta/ tree (including maintenance tests) stays outside it;
+    # WORKFLOW below names the single production CI file, not every workflow.
     paths = []
-    for folder in ('kibot_yaml', 'Templates', 'kibot_resources/fonts', 'kibot_resources/colors',
-                   'kibot_resources/scripts', 'kibot_resources/templates'):
+    for folder in ('kibot_yaml', 'Templates', *RESOURCE_POLICIES):
         parent = project_path(root, folder)
         if not parent.exists():
             continue
@@ -194,7 +206,7 @@ def canonical(path: str, data: bytes) -> bytes:
         value = _mask(value.encode(), 'definitions', METADATA)
     elif kind == 'workflow':
         workflow_block(value.encode())  # Check compatibility, not only the editable status.
-        value = _mask(value.encode(), 'env', ('kibot_variant',))
+        value = _mask(value.encode(), 'env', ('kibot_variant', 'kicad_version'))
     elif kind == 'release_variables':
         value, _ = release_entries(value)
     if kind in ('metadata', 'workflow', 'release_variables'):
@@ -212,7 +224,8 @@ def adapted(path: str, incoming: bytes, current: bytes | None) -> bytes:
         incoming = metadata_block(incoming).replace(values, prefer_plain=('REVIEWER',))
     elif kind == 'workflow':
         values = workflow_block(current).values
-        incoming = workflow_block(incoming).replace({'kibot_variant': values['kibot_variant']})
+        incoming = workflow_block(incoming).replace({key: values[key]
+                                                    for key in ('kibot_variant', 'kicad_version')})
     elif kind == 'release_variables':
         value, _ = release_entries(text(incoming))
         _, entries = release_entries(text(current))
@@ -443,7 +456,7 @@ def compare(root: Path, template: Template) -> Comparison:
                 raise SetupError(f'Document baseline hash mismatch for {relative}.')
         incoming = adapted(relative, data, current)
         merged = None
-        expected_hash = digest(canonical(relative, data))
+        expected_hash = digest(canonical(relative, incoming if policy(relative) == 'workflow' else data))
         current_hash = digest(canonical(relative, current)) if current is not None else None
         if current is None:
             status, action = 'Missing required file', 'use'
@@ -521,6 +534,8 @@ def prepare_upgrade(comparison: Comparison, choices: dict[str, str], edits: dict
         if after != item.current:
             changes.append(Change(item.path, item.current, after))
         data = comparison.template.files[item.path]
+        if policy(item.path) == 'workflow':
+            data = item.incoming
         files[item.path] = {'policy': policy(item.path), 'hash': digest(canonical(item.path, data))}
         if policy(item.path) == 'document':
             files[item.path]['content'] = text(data)

@@ -1,4 +1,4 @@
-"""Link a checkout into the KiCad 9 IPC plugins folder without replacing installs."""
+"""Link a checkout into the selected KiCad IPC plugins folder without replacing installs."""
 
 from __future__ import annotations
 
@@ -14,14 +14,14 @@ if __package__ in (None, ''):
 from scripts.build_release import validate_plugin_identifier
 
 
-def plugin_directory() -> Path:
+def plugin_directory(major: int = 9) -> Path:
     if os.environ.get("KICAD_DOCUMENTS_HOME"):
-        base = Path(os.environ["KICAD_DOCUMENTS_HOME"])
+        base = Path(os.environ["KICAD_DOCUMENTS_HOME"]) / ('kicad' if sys.platform == 'linux' else 'KiCad')
     elif sys.platform == "linux":
         base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "kicad"
     else:
         base = Path.home() / "Documents/KiCad"
-    return base / "9.0/plugins"
+    return base / f"{major}.0/plugins"
 
 
 def pcm_installations(plugins_dir: Path) -> list[Path]:
@@ -43,8 +43,10 @@ def pcm_installations(plugins_dir: Path) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plugins-dir", type=Path, default=plugin_directory())
+    parser.add_argument("--kicad-major", type=int, choices=(9, 10), default=9)
+    parser.add_argument("--plugins-dir", type=Path)
     args = parser.parse_args()
+    args.plugins_dir = args.plugins_dir or plugin_directory(args.kicad_major)
     source = Path(__file__).resolve().parents[1]
     manifest = json.loads((source / 'plugin.json').read_text(encoding='utf-8'))
     validate_plugin_identifier(manifest['identifier'])

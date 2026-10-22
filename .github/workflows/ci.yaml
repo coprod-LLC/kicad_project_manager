@@ -2,20 +2,58 @@ name: Checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'port/**']
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  mac_bundle:
+    name: Official KiCad 10.0.7 Mac Python
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify the official universal Mac bundle
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.7/kicad-unified-universal-10.0.7.dmg \
+            -o "$RUNNER_TEMP/kicad.dmg"
+          echo "fbc27419b841a9a2a8b143b5875a87b8bd943ffcf487d53c78a8fb6d24c59e27  $RUNNER_TEMP/kicad.dmg" | shasum -a 256 --check
+          hdiutil attach "$RUNNER_TEMP/kicad.dmg" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/kicad-volume"
+      - name: Verify native CLI, development installer and managed plugin Python
+        shell: bash
+        run: |
+          app="$RUNNER_TEMP/kicad-volume/KiCad/KiCad.app/Contents"
+          python="$app/Frameworks/Python.framework/Versions/Current/bin/python3"
+          "$app/MacOS/kicad-cli" version
+          "$python" -c 'import sys,ssl,venv,wx; from wx.svg import SVGimage; print(sys.version); print(wx.version())'
+          "$python" scripts/install_dev.py --kicad-major 10 --plugins-dir "$RUNNER_TEMP/kicad-plugins"
+          "$python" -m venv --system-site-packages "$RUNNER_TEMP/plugin-python"
+          "$RUNNER_TEMP/plugin-python/bin/python" -m pip install -r requirements.txt
+      - name: Project Manager tests with bundled Mac Python
+        run: '"$RUNNER_TEMP/plugin-python/bin/python" -m unittest discover -s tests -v'
+      - name: Native Mac GUI regression
+        run: |
+          "$RUNNER_TEMP/plugin-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
+          "$RUNNER_TEMP/plugin-python/bin/python" -m scripts.smoke_stackup_save --output .dev/mac-save-preset
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-mac-gui
+          include-hidden-files: true
+          path: |
+            .dev/*.png
+            .dev/mac-save-preset
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ['3.10', '3.12']
+        python: ['3.9', '3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,9 +88,18 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: gui-preview
+          include-hidden-files: true
           path: .dev/gui.png
   kibot:
-    name: KiBot metadata integration (KiCad 9)
+    name: KiBot metadata integration (KiCad ${{ matrix.major }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - major: 9
+            image: ghcr.io/inti-cmnb/kicad9_auto_full@sha256:4aabcd7d09ba3b605b9e9813b0ee41a8dbaa4fda777929e235a718f7d47f6113
+          - major: 10
+            image: ghcr.io/inti-cmnb/kicad10_auto_full@sha256:7b720dc99b2775e4f4133f06887cf9a53c85a8403438d6684ecf0916d124f52a
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,15 +116,15 @@ jobs:
           persist-credentials: false
       - name: Prepare a disposable project through the setup editor
         run: python -m scripts.check_template prepare --template .dev/kdt-template --project .dev/ci-project
-      - name: Generate metadata with the official KiCad 9 KiBot image
+      - name: Generate metadata with the pinned KiBot image (patch-version smoke baseline)
         run: |
           docker run --rm -v "$PWD:/work" -w /work/.dev/ci-project \
-            ghcr.io/inti-cmnb/kicad9_auto_full@sha256:4aabcd7d09ba3b605b9e9813b0ee41a8dbaa4fda777929e235a718f7d47f6113 \
+            ${{ matrix.image }} \
             sh -c 'git config --global --add safe.directory /work/.dev/ci-project && kibot -c kibot_yaml/kibot_main.yaml -b KDT_Hierarchical_KiBot.kicad_pcb -e KDT_Hierarchical_KiBot.kicad_sch -g variant=PRELIMINARY -s draw_fancy_stackup,erc,drc,update_xml md_readme'
       - name: Verify generated metadata and report
         run: python -m scripts.check_template verify --project .dev/ci-project
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: kibot-metadata-report
+          name: kibot-metadata-report-${{ matrix.major }}
           path: .dev/ci-project/README.md

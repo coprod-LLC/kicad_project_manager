@@ -21,6 +21,24 @@ from .template_ui import (MATCH_COLOUR as FOUND_COLOUR, MODIFIED_COLOUR, MISSING
                           TemplateReviewDialog, show_details, show_text_details)
 from .yaml_fields import SetupError
 
+
+def _wrap_text(control: wx.StaticText, value: str, width: int) -> str:
+    # Measure whole lines with the label's font. Start from the original text
+    # each time so widening the window also removes old line breaks.
+    lines = []
+    for paragraph in value.split('\n'):
+        line = ''
+        for word in paragraph.split():
+            candidate = f'{line} {word}' if line else word
+            if line and control.GetTextExtent(candidate).width > width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        lines.append(line)
+    return '\n'.join(lines)
+
+
 class ProjectManagerFrame(wx.Frame):
     def __init__(self, provider: Callable[[], ProjectContext], storage: Path | None = None):
         super().__init__(None, title=f"{NAME} — {__version__}", size=(1100, 940))
@@ -33,6 +51,7 @@ class ProjectManagerFrame(wx.Frame):
         self.template_source: Path | None = None
         self.template_error_details: str | None = None
         self._overview_layout_pending = False
+        self._overview_text_widths = {}
         icon_path = Path(__file__).resolve().parent.parent / "resources" / "icon.png"
         if icon_path.is_file():
             self.SetIcon(wx.Icon(str(icon_path), wx.BITMAP_TYPE_PNG))
@@ -74,7 +93,8 @@ class ProjectManagerFrame(wx.Frame):
         grid.AddSpacer(0)
         template_box = self._template_box = wx.BoxSizer(wx.VERTICAL)
         self._template_status_text = 'Choose a template to check project files.'
-        self.template_status = wx.StaticText(box.GetStaticBox(), label=self._template_status_text)
+        self.template_status = wx.StaticText(box.GetStaticBox(), label=self._template_status_text,
+                                             style=wx.ST_NO_AUTORESIZE)
         self.template_status.SetMinSize((1, -1))
         template_box.Add(self.template_status, 0, wx.EXPAND)
         actions = wx.BoxSizer(wx.HORIZONTAL)
@@ -98,7 +118,8 @@ class ProjectManagerFrame(wx.Frame):
         standards_row.Add(change_standards)
         grid.Add(standards_row, 1, wx.EXPAND)
         grid.AddSpacer(0)
-        self.standards_status = wx.StaticText(box.GetStaticBox(), label='Choose a shared standards repository above.')
+        self.standards_status = wx.StaticText(box.GetStaticBox(), label='Choose a shared standards repository above.',
+                                              style=wx.ST_NO_AUTORESIZE)
         self.standards_status.SetMinSize((1, -1))
         grid.Add(self.standards_status, 1, wx.EXPAND)
         grid.Add(wx.StaticText(box.GetStaticBox(), label='Backups folder'), 0, wx.ALIGN_CENTER_VERTICAL)
@@ -121,8 +142,11 @@ class ProjectManagerFrame(wx.Frame):
         self._overview_note_text = ('Review template changes and add missing files here. '
                                     'Project Setup edits metadata and documentation status. '
                                     'Design Rules and Stackup use the shared standards repository. Apply after the PCB and schematic editors are closed.')
-        note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text)
+        note = self._overview_note = wx.StaticText(overview, label=self._overview_note_text,
+                                                    style=wx.ST_NO_AUTORESIZE)
         note.SetMinSize((1, -1))
+        for control in (self.template_status, self.standards_status, note):
+            control.Bind(wx.EVT_SIZE, self._on_overview_text_size)
         overview_layout.Add(note, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         overview_layout.Add(wx.StaticText(overview, label="Activity"), 0, wx.LEFT | wx.TOP, 16)
         self.log = wx.TextCtrl(overview, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 110))
@@ -142,7 +166,7 @@ class ProjectManagerFrame(wx.Frame):
         self.notebook.AddPage(self.stackup_panel, 'Stackup')
         layout.Add(self.notebook, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         footer = wx.BoxSizer(wx.HORIZONTAL)
-        footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9"), 1, wx.ALIGN_CENTER_VERTICAL)
+        footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9 / 10"), 1, wx.ALIGN_CENTER_VERTICAL)
         close = wx.Button(panel, id=wx.ID_CLOSE)
         close.Bind(wx.EVT_BUTTON, lambda event: self.Close())
         footer.Add(close)
@@ -182,6 +206,15 @@ class ProjectManagerFrame(wx.Frame):
         self._queue_overview_layout()
         event.Skip()
 
+    def _on_overview_text_size(self, event):
+        # Cocoa may allocate the final child width after the overview's size
+        # event. Rewrap when that width arrives; height changes need no rewrap.
+        key, width = event.GetId(), event.GetSize().width
+        if self._overview_text_widths.get(key) != width:
+            self._overview_text_widths[key] = width
+            self._queue_overview_layout()
+        event.Skip()
+
     def _queue_overview_layout(self):
         if not self._overview_layout_pending and not self._closing:
             self._overview_layout_pending = True
@@ -191,20 +224,25 @@ class ProjectManagerFrame(wx.Frame):
         self._overview_layout_pending = False
         if self._closing:
             return
-        # Wrap to the actual column width, and reserve the full wrapped height.
-        # Always start from the original text so widening also removes old wraps.
-        for control, value, width in (
-                (self.template_status, self._template_status_text, self._template_box.GetSize().width),
-                (self.standards_status, self.standards_status.GetToolTipText() or self.standards_status.GetLabel(),
-                 self._template_box.GetSize().width),
-                (self._overview_note, self._overview_note_text, self.overview.GetClientSize().width - 32)):
-            control.SetMinSize((1, -1))
-            control.SetLabel(value)
-            control.Wrap(max(1, width))
-            control.InvalidateBestSize()
-            control.SetMinSize((1, control.GetBestSize().height))
+        # Native static boxes and scrollbars can leave less room than the column
+        # sizer reports. Measure each allocated control, then recheck after the
+        # wrapped height has changed the scrolling area.
+        controls = (
+                (self.template_status, self._template_status_text),
+                (self.standards_status, self.standards_status.GetToolTipText() or self.standards_status.GetLabel()),
+                (self._overview_note, self._overview_note_text))
         self.overview.Layout()
-        self.overview.FitInside()
+        for _ in range(3):
+            widths = [max(1, control.GetClientSize().width) for control, _ in controls]
+            for (control, value), width in zip(controls, widths):
+                control.SetMinSize((1, -1))
+                control.SetLabel(_wrap_text(control, value, width))
+                control.InvalidateBestSize()
+                control.SetMinSize((1, control.GetBestSize().height))
+            self.overview.Layout()
+            self.overview.FitInside()
+            if all(control.GetClientSize().width == width for (control, _), width in zip(controls, widths)):
+                break
 
     def _set_template_status(self, value: str, colour):
         self._template_status_text = value
@@ -252,7 +290,6 @@ class ProjectManagerFrame(wx.Frame):
         self.choose_template_button.Disable()
         self.template_details_button.Disable()
         self.template_review_button.Disable()
-        template_directory = kicad_user_template_directory()
         for panel in self.standards_panels:
             panel.reload_catalog()
 
@@ -261,6 +298,7 @@ class ProjectManagerFrame(wx.Frame):
             template_result = (None, None, None)
             try:
                 context = self._provider()
+                template_directory = kicad_user_template_directory(major=int(context.kicad_version.split('.')[0]))
                 if context.project_saved:
                     source = None
                     try:
@@ -336,7 +374,7 @@ class ProjectManagerFrame(wx.Frame):
         if setup_result:
             snapshot, values, setup_error = setup_result
             if snapshot is not None:
-                self.setup_panel.load(snapshot, values)
+                self.setup_panel.load(snapshot, values, int(context.kicad_version.split('.')[0]))
             else:
                 self.setup_panel.clear(setup_error)
                 self._append_log(setup_error)
@@ -350,7 +388,7 @@ class ProjectManagerFrame(wx.Frame):
             return None
         if not self._can_discard():
             return None
-        start = kicad_user_template_directory()
+        start = kicad_user_template_directory(major=int(self._context.kicad_version.split('.')[0]))
         while not start.exists() and start != start.parent:
             start = start.parent
         dialog = wx.DirDialog(self, "Choose the versioned KiCad template folder",

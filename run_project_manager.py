@@ -36,6 +36,15 @@ def main() -> int:
         )
         return 1
     app = wx.App(False)
+    # Bind settings and locks before creating the window. Keep connection errors
+    # out of the KiCad 9 settings directory when a 10 launch cannot connect.
+    try:
+        initial = provider()
+    except ContextError as exc:
+        wx.MessageBox(str(exc), NAME, wx.OK | wx.ICON_ERROR)
+        return 1
+    from project_manager.preferences import configure_runtime
+    configure_runtime(int(initial.kicad_version.split('.')[0]))
     from project_manager.instance import ensure_single_instance
     if not ensure_single_instance(app):
         return 0
