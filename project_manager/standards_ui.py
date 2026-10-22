@@ -71,8 +71,9 @@ class StandardsPanel(wx.ScrolledWindow):
         if self.kind == 'stackups':
             self._build_stackups(layout)
         else:
-            # Give GTK a usable allocation before pages trigger the first layout.
-            rule_pages = wx.Notebook(self, size=wx.GetTopLevelParent(self).GetClientSize())
+            # Set the startup allocation without imposing a minimum size.
+            rule_pages = wx.Notebook(self)
+            rule_pages.SetSize(wx.GetTopLevelParent(self).GetClientSize())
             self.rule_values = wx.ListCtrl(rule_pages, style=wx.LC_REPORT | wx.LC_HRULES)
             for index, (label, width) in enumerate([('Board constraint', 320), ('Current saved value', 180),
                                                    ('Selected profile', 180)]):
@@ -106,7 +107,8 @@ class StandardsPanel(wx.ScrolledWindow):
             layout.Insert(2, self.feedback, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
             self.Bind(wx.EVT_SIZE, self._on_feedback_size)
         else:
-            results = wx.Notebook(self, size=wx.GetTopLevelParent(self).GetClientSize())
+            results = wx.Notebook(self)
+            results.SetSize(wx.GetTopLevelParent(self).GetClientSize())
             self.summary = wx.TextCtrl(results, style=wx.TE_MULTILINE | wx.TE_READONLY)
             self.diff = wx.TextCtrl(results, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
             self.diff.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
