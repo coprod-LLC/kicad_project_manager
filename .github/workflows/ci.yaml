@@ -79,6 +79,8 @@ jobs:
     timeout-minutes: 5
     env:
       G_DEBUG: fatal-warnings
+      # The virtual-display job has no desktop accessibility bus.
+      NO_AT_BRIDGE: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Install native GUI test dependencies
