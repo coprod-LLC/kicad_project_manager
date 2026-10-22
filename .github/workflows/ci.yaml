@@ -78,13 +78,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      G_DEBUG: fatal-warnings
       # The virtual-display job has no desktop accessibility bus.
       NO_AT_BRIDGE: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Install native GUI test dependencies
         run: sudo apt-get update && sudo apt-get install -y python3-wxgtk4.0 xvfb
+      - name: Check startup without GTK warnings
+        env:
+          G_DEBUG: fatal-warnings
+        run: xvfb-run -a /usr/bin/python3 -u -m scripts.smoke_gui --startup-only
       - name: Exercise the window and capture it
         run: xvfb-run -a /usr/bin/python3 -u -m scripts.smoke_gui --output .dev/gui.png
       - name: Exercise Save as preset

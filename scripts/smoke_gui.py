@@ -36,6 +36,7 @@ from tests.standards_fixtures import RULES, detailed_catalog, saved_board
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path(".dev/gui.png"))
+    parser.add_argument("--startup-only", action="store_true", help="Show and close the window without exercising later interactions")
     args = parser.parse_args()
     temporary = TemporaryDirectory()
     base = Path(temporary.name)
@@ -70,6 +71,12 @@ def main() -> int:
     app = wx.App(False)
     frame = ProjectManagerFrame(provider, storage=base / 'settings')
     frame.Show()
+    if args.startup_only:
+        wx.CallLater(500, frame.Close)
+        app.MainLoop()
+        temporary.cleanup()
+        print('GUI startup and close passed', flush=True)
+        return 0
     started = time.monotonic()
     failures = []
     phase = 0
