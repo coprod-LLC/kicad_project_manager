@@ -22,6 +22,8 @@ class PackageTests(unittest.TestCase):
             original = archive.read_bytes()
             metadata = json.loads(metadata_path.read_text())
             version = metadata["versions"][0]
+            self.assertEqual(version["status"], "stable")
+            self.assertEqual((version["kicad_version"], version["kicad_version_max"]), ("9.0", "10.99"))
             self.assertEqual(version["download_sha256"], hashlib.sha256(original).hexdigest())
             self.assertEqual(version["download_size"], len(original))
             with zipfile.ZipFile(archive) as package:
@@ -63,17 +65,21 @@ class PackageTests(unittest.TestCase):
             root = Path(folder)
             _, metadata_path = build(ROOT, root / "dist", "v" + source_version(), "example/project-manager")
             first = json.loads(metadata_path.read_text())
+            first["versions"][0]["version"] = "0.9.0"
             next_version = deepcopy(first)
             next_version["versions"][0]["version"] = "0.10.0"
             next_version['description'] = 'Latest package description'
             package = merge_packages([first, next_version, first])
-            self.assertEqual([entry["version"] for entry in package["versions"]], ["0.10.0", source_version()])
+            self.assertEqual([entry["version"] for entry in package["versions"]], ["0.10.0", "0.9.0"])
             self.assertEqual(package['description'], 'Latest package description')
             write_catalog(package, root / "site", "https://example.org/plugins", 12345)
             repository = json.loads((root / "site/repository.json").read_text())
             actual_hash = hashlib.sha256((root / "site/packages.json").read_bytes()).hexdigest()
             self.assertEqual(repository["packages"]["sha256"], actual_hash)
             self.assertEqual(repository["packages"]["url"], "https://example.org/plugins/packages.json")
+            homepage = (root / "site/index.html").read_text()
+            self.assertIn("KiCad 9 and 10", homepage)
+            self.assertIn("(stable)", homepage)
 
     def test_feed_refuses_replacing_published_version(self):
         package = {"identifier": IDENTIFIER, "versions": [{"version": "0.1.0", "download_sha256": "a"}]}

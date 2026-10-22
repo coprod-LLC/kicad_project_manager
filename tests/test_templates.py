@@ -95,6 +95,34 @@ class TemplateTests(unittest.TestCase):
         self.assertFalse(comparison.problems)
         self.assertFalse((self.project / STATE).exists())
 
+    def test_maintenance_tests_and_optional_workflow_are_never_managed(self):
+        tests = self.template.root / 'meta/tests'
+        tests.mkdir(parents=True)
+        (tests / 'check_workflow.py').write_text('print("maintenance only")\n')
+        (tests / 'example.kicad_pcb.txt').write_text('example board\n')
+        (tests / 'kicad-port-trial.yaml').write_text('name: Optional test\n')
+        optional = '.github/workflows/kicad-port-trial.yaml'
+        # A developer can enable the secondary workflow without changing the
+        # production manifest. The plugin never installs it into PCB projects.
+        (self.template.root / optional).write_text('name: Enabled template test\n')
+        original_paths = set(self.template.files)
+        self.template = release(self.template.root, '1.1.0')
+        self.assertEqual(set(self.template.files), original_paths)
+        self.assertFalse(self.inspect().problems)
+        self.adopt()
+        self.assertFalse((self.project / 'meta').exists())
+        self.assertFalse((self.project / optional).exists())
+
+        # A manually installed workflow and local test files remain untouched.
+        local_tests = self.project / 'meta/tests'
+        local_tests.mkdir(parents=True)
+        (local_tests / 'check_workflow.py').write_text('local maintenance edits\n')
+        (self.project / optional).write_text('name: My optional workflow\n')
+        self.assertFalse(self.inspect().problems)
+        self.adopt()
+        self.assertEqual((local_tests / 'check_workflow.py').read_text(), 'local maintenance edits\n')
+        self.assertEqual((self.project / optional).read_text(), 'name: My optional workflow\n')
+
     def test_metadata_quoting_line_endings_history_and_status_are_preserved(self):
         original = (self.project / CONFIG).read_bytes()
         values = {key: f'Project {key}' for key in METADATA}

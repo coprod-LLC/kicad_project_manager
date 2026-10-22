@@ -15,13 +15,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Check out the companion Library Manager port
-        uses: actions/checkout@v4
-        with:
-          repository: theohg-coprod/kicad_library_manager
-          ref: port/kicad10
-          path: .dev/library-manager
-          persist-credentials: false
       - name: Download and verify the official universal Mac bundle
         shell: bash
         run: |
@@ -30,27 +23,22 @@ jobs:
             -o "$RUNNER_TEMP/kicad.dmg"
           echo "fbc27419b841a9a2a8b143b5875a87b8bd943ffcf487d53c78a8fb6d24c59e27  $RUNNER_TEMP/kicad.dmg" | shasum -a 256 --check
           hdiutil attach "$RUNNER_TEMP/kicad.dmg" -readonly -nobrowse -mountpoint "$RUNNER_TEMP/kicad-volume"
-      - name: Verify native CLI, installer discovery and managed plugin Python
+      - name: Verify native CLI, development installer and managed plugin Python
         shell: bash
         run: |
           app="$RUNNER_TEMP/kicad-volume/KiCad/KiCad.app/Contents"
           python="$app/Frameworks/Python.framework/Versions/Current/bin/python3"
           "$app/MacOS/kicad-cli" version
           "$python" -c 'import sys,ssl,venv,wx; from wx.svg import SVGimage; print(sys.version); print(wx.version())'
-          "$python" scripts/setup_port.py --cli "$app/MacOS/kicad-cli" --dry-run
-          "$python" -m venv --system-site-packages "$RUNNER_TEMP/port-python"
-          "$RUNNER_TEMP/port-python/bin/python" -m pip install -r requirements.txt -r .dev/library-manager/requirements.txt
+          "$python" scripts/install_dev.py --kicad-major 10 --plugins-dir "$RUNNER_TEMP/kicad-plugins"
+          "$python" -m venv --system-site-packages "$RUNNER_TEMP/plugin-python"
+          "$RUNNER_TEMP/plugin-python/bin/python" -m pip install -r requirements.txt
       - name: Project Manager tests with bundled Mac Python
-        run: '"$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v'
-      - name: Library Manager tests and native UI imports with bundled Mac Python
-        working-directory: .dev/library-manager
-        run: |
-          "$RUNNER_TEMP/port-python/bin/python" -m unittest discover -s tests -v
-          "$RUNNER_TEMP/port-python/bin/python" -c 'from library_manager.ui import MainDialog, RepoSettingsDialog; from library_manager.paths import config_directory; print(config_directory())'
+        run: '"$RUNNER_TEMP/plugin-python/bin/python" -m unittest discover -s tests -v'
       - name: Native Mac GUI regression
         run: |
-          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
-          "$RUNNER_TEMP/port-python/bin/python" -m scripts.smoke_stackup_save --output .dev/mac-save-preset
+          "$RUNNER_TEMP/plugin-python/bin/python" -m scripts.smoke_gui --output .dev/mac-gui.png
+          "$RUNNER_TEMP/plugin-python/bin/python" -m scripts.smoke_stackup_save --output .dev/mac-save-preset
       - uses: actions/upload-artifact@v4
         if: always()
         with:

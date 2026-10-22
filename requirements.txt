@@ -1,4 +1,4 @@
 # KiCad installs this into its per-plugin virtual environment.
-# wxPython comes from KiCad's Python on macOS/Windows and the distro on Linux.
+# wxPython comes from bundled KiCad Python (including AppImage) or the Linux distro.
 # Do not pip-install wxPython: source builds make onboarding unnecessarily hard.
 kicad-python==0.8.0

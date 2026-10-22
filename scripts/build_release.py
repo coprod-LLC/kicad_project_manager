@@ -13,7 +13,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = (
     "plugin.json", "requirements.txt", "run_project_manager.py", "LICENSE", "README.md",
-    "docs/usage.md", "docs/development.md", "docs/standards-format.md", "docs/port-mac.md",
+    "docs/usage.md", "docs/development.md", "docs/standards-format.md",
     "docs/screenshots/overview.png", "docs/screenshots/project-setup.png",
     "docs/screenshots/design-rules.png", "docs/screenshots/stackup.png",
     "docs/screenshots/template-review.png",
@@ -77,7 +77,7 @@ def build(root: Path, output: Path, tag: str, repository: str) -> tuple[Path, Pa
         raise ValueError("IPC and PCM identifiers must match")
     validate_plugin_identifier(manifest["identifier"])
     entry = {
-        "version": version, "status": "testing", "runtime": "ipc",
+        "version": version, "status": "stable", "runtime": "ipc",
         "kicad_version": "9.0", "kicad_version_max": "10.99",
         "platforms": ["windows", "macos", "linux"],
     }

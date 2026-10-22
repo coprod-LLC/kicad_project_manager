@@ -75,6 +75,9 @@ def policy(path: str) -> str:
 
 
 def inventory(root: Path) -> list[str]:
+    # Only project automation belongs in the required-file manifest. KiCad's
+    # template-only meta/ tree (including maintenance tests) stays outside it;
+    # WORKFLOW below names the single production CI file, not every workflow.
     paths = []
     for folder in ('kibot_yaml', 'Templates', *RESOURCE_POLICIES):
         parent = project_path(root, folder)

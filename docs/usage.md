@@ -31,6 +31,10 @@ reviewing **Use template** copies them into the project. Changed project logos
 require review before replacement. Template maintainers must regenerate the
 manifest with a new template version after adding files.
 
+Maintenance files under `meta/`, including `meta/tests/`, are outside the required
+inventory. The plugin manages only `.github/workflows/ci.yaml`; optional workflows
+are neither installed nor updated. Existing local maintenance files are left alone.
+
 **Review adoption…** / **Review upgrade…** shows matches in green, differences in
 amber and missing files in red, with text labels. Matching files start at **Keep
 project**; differences start at **Choose action…**. Shift-click selects a range;

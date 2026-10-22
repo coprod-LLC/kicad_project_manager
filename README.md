@@ -3,16 +3,12 @@
 A native **KiCad 9 / 10** plugin for KiBot project setup, template updates, design
 rules and PCB stackups. Use your own compatible templates and standards folders.
 
-## KiCad 10 port trial
-
-For the five-repository development setup and one-command symlink installation,
-see [Mac trial setup](docs/port-mac.md). This branch has not been released to PCM.
-
 ## Install
 
-1. Enable **Preferences → Plugins → Enable KiCad API**. On Debian/Ubuntu, install
-   `python3-pip python3-venv python3-wxgtk4.0` and select the system Python.
-   macOS/Windows use KiCad’s bundled Python.
+1. Enable **Preferences → Plugins → Enable KiCad API**. Use KiCad’s bundled
+   Python on macOS, Windows and Linux AppImage installations. For native
+   Debian/Ubuntu packages, install `python3-pip python3-venv python3-wxgtk4.0`
+   and select the system Python.
 2. In **Plugin and Content Manager → Manage…**, add:
    ```text
    https://coprod-llc.github.io/kicad_project_manager/repository.json
@@ -21,8 +17,10 @@ see [Mac trial setup](docs/port-mac.md). This branch has not been released to PC
    Open the plugin from its toolbar button or **Tools → External Plugins**.
 
 Alternatively, install the packaged ZIP from [Releases](https://github.com/coprod-LLC/kicad_project_manager/releases).
-Packages are marked **Testing**. When upgrading from the previous package identity,
-uninstall that copy first; the generic ID is now `org.kicadprojectmanager.plugin`.
+Version **1.0.0** is a stable release for KiCad 9 and 10. When upgrading from a
+previous package identity, uninstall that copy first; the package ID is
+`org.kicadprojectmanager.plugin`. Unlink source installations before installing
+the PCM package. For manual clone/symlink setup, see [development installation](docs/development.md#development-installation).
 
 ## Use
 

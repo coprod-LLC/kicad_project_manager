@@ -1,10 +1,18 @@
-KiCad Project Manager v0.8.0 — unreleased port branch
+KiCad Project Manager v1.0.0
 
+- First stable PCM release, supporting KiCad 9 and 10 on Linux, macOS and Windows.
 - Support KiCad 9 and 10 IPC, workflows and their explicitly recognized board formats.
 - Preserve a project's selected KiCad major during template updates.
+- Let Project Setup select the CI KiCad major and suggest upgrading it for files
+  opened in KiCad 10. Show persistent success/failure feedback after Apply.
 - Require standards to declare compatibility before applying them to another major.
 - Read KiCad 10 net names and retain the source major when capturing stackup presets.
 - Select template/install paths for the intended major, including documents-root overrides.
+- Detect and restore missing template resources, including all nested text/binary
+  logos, even when the template version already matches.
+- Exclude template maintenance files and optional workflows from managed updates.
+- Remove company-specific trial setup and companion-plugin CI dependencies;
+  retain generic PCM and manual development installation.
 
 KiCad Project Manager v0.7.0
 
