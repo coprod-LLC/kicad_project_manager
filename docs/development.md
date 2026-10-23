@@ -57,7 +57,7 @@ session token automatically. Diagnostics contain local paths.
 ```sh
 python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m unittest discover -s tests -v
-python -m scripts.build_release --tag v1.0.1
+python -m scripts.build_release --tag v1.1.0
 python -m scripts.validate_package --schemas /usr/share/kicad/schemas
 python -m scripts.smoke_gui --output .dev/gui.png
 python -m scripts.smoke_stackup_save --output .dev/save-preset
@@ -101,6 +101,15 @@ python -m scripts.template_manifest --template /path/to/template --check
 Generation updates the marked badge and writes
 `kibot_resources/project_manager/template.json`. Commit both. Publish any changed
 managed source as a new version; published versions are immutable.
+
+Known note/README `.txt` files and root `LICENSE` use the `document` policy.
+To make another `.txt`, `.md` or `.csv` under `kibot_resources/templates/`
+editable, generate the manifest, set that file's `policy` to `document`, and
+regenerate/verify it. Generation preserves these explicit document declarations.
+Other text resources remain shared, read-only files in the review editor; scripts,
+YAML and binary resources cannot opt into document editing. Changing a file's
+policy requires a new template version and a fresh project review.
+
 
 ## Releases
 

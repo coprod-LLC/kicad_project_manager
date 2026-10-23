@@ -1,16 +1,35 @@
+KiCad Project Manager v1.1.0
+
+- Separate Project documents from shared Template files in template review. Use
+  a resizable file list and editor/diff workspace with search and bulk actions.
+- Open editable documents directly in a large editor. Keep drafts and pending
+  choices across filters, selections and partial applies. Remove the redundant
+  README shortcut and previous-baseline tab; retain stored merge baselines.
+- Distinguish reference comparisons from action-specific planned changes. Color
+  both diff modes and Apply previews red/green; shared files stay diff-only.
+- Refresh the open review from disk without losing compatible drafts. Confirm
+  before discarding edits to externally changed files; recheck changed actions.
+- Keep review open after confirming Preview Apply, just as with direct Apply.
+  Return .gitignore to green after custom patterns are removed; comments and
+  blank lines alone no longer count as custom rules.
+- Give shared/project ignore sections a draggable horizontal 50/50 split.
+- Edit standard impedance CSV documents in a cell table with Add/Delete row and
+  Text fallback. Import missing guidance only from a saved-board construction
+  match, retaining manual rows/tolerances and reporting width/gap conflicts.
+- Simplify Overview by removing the redundant Board file path row.
+- Edit only the project section of a managed .gitignore; protect shared rules,
+  preserve project overrides and show custom project rules in blue.
+- Remember accepted document customizations in the project review record. Keep
+  the overall status green and request review when that template default changes.
+- Review template-provided LICENSE files through Keep project / Use template,
+  with overwrite confirmation and local backups. Older records remain supported.
+- Allow template manifests to declare additional plain documents under their
+  templates resource folder without enabling editing for automation or binaries.
+
 KiCad Project Manager v1.0.1
 
 - Prevent four GTK allocation warnings when opening Design Rules by sizing its
   nested notebooks before adding their pages. Settings and project files are unchanged.
-- Remember accepted document customizations in the project review record. Show
-  them in blue, keep the overall status green and request review when the
-  corresponding template default changes. Preserve existing review records.
-- Review template-provided LICENSE files through the standard Keep project /
-  Use template actions, with overwrite confirmation and local backups.
-- Add a confirmed shortcut to restore the installed README source, keeping
-  other pending review choices; CI regenerates the root README on its next run.
-- Update a template's shared .gitignore section while preserving project rules
-  and overrides below its project marker.
 
 KiCad Project Manager v1.0.0
 

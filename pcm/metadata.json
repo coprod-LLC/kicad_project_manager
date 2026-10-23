@@ -1,8 +1,8 @@
 {
   "$schema": "https://go.kicad.org/pcm/schemas/v1",
   "name": "KiCad Project Manager",
-  "description": "Review template updates, edit KiBot metadata, and inspect and apply reusable rules and stackups.",
-  "description_full": "A native KiCad 9 and 10 companion for versioned KiBot templates and reusable standards. Review template files with bulk selection and partial apply, edit project metadata and workflow status, compare design rules and physical stackups, and save a board construction as a reusable preset. Changes use local backups and conflict detection. Enable the KiCad API in Preferences → Plugins. Select a Python interpreter with pip, venv and wxPython, using the bundled interpreter for AppImage installations. Save and close PCB and schematic editors before applying standards.",
+  "description": "Review template updates, edit project documents and KiBot metadata, and manage reusable rules and stackups.",
+  "description_full": "A native KiCad 9 and 10 companion for versioned KiBot templates and reusable standards. Review shared template files and editable project documents in a resizable workspace, compare reference and planned changes with colored diffs, retain accepted customizations and refresh without losing compatible drafts. Edit project metadata, workflow status and impedance tables, import missing guidance matching the saved board, compare design rules and physical stackups, and save a board construction as a reusable preset. Changes use local backups and conflict detection. Enable the KiCad API in Preferences → Plugins. Select a Python interpreter with pip, venv and wxPython, using the bundled interpreter for AppImage installations. Save and close PCB and schematic editors before applying standards.",
   "identifier": "org.kicadprojectmanager.plugin",
   "type": "plugin",
   "author": {"name": "KiCad Project Manager contributors", "contact": {"web": "https://github.com/coprod-LLC/kicad_project_manager"}},

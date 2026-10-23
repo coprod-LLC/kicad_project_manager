@@ -5,7 +5,7 @@ changed here. Published manifests cover an explicit inventory of automation file
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import difflib
 import hashlib
 import json
@@ -116,6 +116,18 @@ def inventory(root: Path, *, include_license: bool = False) -> list[str]:
     return sorted(paths)
 
 
+def declared_policy(path: str, entry: dict) -> str:
+    """Allow template authors to opt additional plain documentation into editing."""
+    kind = policy(path)
+    if (kind == 'text' and path.startswith('kibot_resources/templates/')
+            and Path(path).suffix.lower() in ('.txt', '.md', '.csv')
+            and isinstance(entry, dict) and entry.get('policy') == 'document'):
+        return 'document'
+    if not isinstance(entry, dict) or entry.get('policy') != kind:
+        raise SetupError(f'Unsupported template ownership rule: {path}')
+    return kind
+
+
 def text(data: bytes) -> str:
     try:
         return data.decode('utf-8-sig').replace('\r\n', '\n')
@@ -135,6 +147,12 @@ def split_ignore_rules(value: str, required: bool = False) -> tuple[str, str]:
                          'one project-rules marker. Keep your own rules below the project marker.')
     boundary = markers.index(IGNORE_USER) + 1
     return ''.join(lines[:boundary]), ''.join(lines[boundary:])
+
+
+def project_ignore_patterns(value: str) -> tuple[str, ...]:
+    """Ignore explanatory comments/blank lines, retaining rule order and escapes."""
+    return tuple(line for line in split_ignore_rules(value)[1].splitlines()
+                 if line.strip() and not line.startswith('#'))
 
 
 def digest(data: bytes) -> str:
@@ -309,15 +327,24 @@ class Template:
     identity: str
     version: str
     files: dict[str, bytes]
+    policies: dict[str, str] = field(default_factory=dict)
+
+    def kind(self, path: str) -> str:
+        return self.policies.get(path) or policy(path)
 
 
 def build_manifest(root: Path, identity: str, version: str) -> bytes:
     version_tuple(version)
+    previous = read_file(root, MANIFEST, MAX_SIZE)
+    entries = decode_json(previous, 'Template manifest').get('files', {}) if previous else {}
+    if not isinstance(entries, dict):
+        raise SetupError('Template manifest must contain a managed-file list.')
     files = {}
     for relative in inventory(root, include_license=True):
         data = read_file(root, relative, MAX_SIZE)
         canonical(relative, data)
-        files[relative] = {'policy': policy(relative), 'sha256': source_hash(relative, data)}
+        kind = declared_policy(relative, entries[relative]) if relative in entries else policy(relative)
+        files[relative] = {'policy': kind, 'sha256': source_hash(relative, data)}
     if CONFIG not in files or WORKFLOW not in files:
         raise SetupError('A template must include KiBot configuration and a compatible workflow.')
     return json_bytes({'schema_version': 1, 'template_id': identity, 'template_version': version, 'files': files})
@@ -346,13 +373,11 @@ def load_template(root: Path) -> Template:
         details.append('\nRestore the original template files, or publish these changes as a new template version. '
                        'Project checks are paused until the installed template is ready to use.')
         raise TemplateSourceError('Installed template files were added, removed or renamed.', '\n'.join(details))
-    files = {}
+    files, policies = {}, {}
     modified = []
     total = 0
     for relative, entry in entries.items():
-        kind = policy(relative)
-        if not isinstance(entry, dict) or entry.get('policy') != kind:
-            raise SetupError(f'Unsupported template ownership rule: {relative}')
+        policies[relative] = declared_policy(relative, entry)
         data = read_file(root, relative, MAX_SIZE)
         if data is None or source_hash(relative, data) != entry.get('sha256'):
             modified.append(relative)
@@ -369,7 +394,7 @@ def load_template(root: Path) -> Template:
         raise TemplateSourceError('Installed template modified. Restore its original files, or publish your edits '
                                   'as a new template version before checking this project.',
                                   '\n'.join(details))
-    return Template(root, raw, manifest['template_id'], manifest['template_version'], files)
+    return Template(root, raw, manifest['template_id'], manifest['template_version'], files, policies)
 
 
 def resolve_template(root: Path, storage: Path | None, user_directory: Path) -> Path | None:
@@ -409,6 +434,23 @@ class Item:
     suggested: str
     base: dict | None
     merged: bytes | None = None
+    kind: str = 'text'
+
+    @property
+    def editable(self) -> bool:
+        return self.kind in ('document', 'ignore_rules')
+
+    def editor_text(self, data: bytes | None = None) -> str:
+        value = text(data if data is not None else self.current if self.current is not None else self.incoming)
+        return split_ignore_rules(value)[1] if self.kind == 'ignore_rules' else value
+
+    def edited_content(self, value: str) -> bytes:
+        if self.kind == 'ignore_rules':
+            shared, _ = split_ignore_rules(text(self.current or b''))
+            if not shared:
+                shared, _ = split_ignore_rules(text(self.incoming), required=True)
+            value = shared + value
+        return value.encode('utf-8')
 
     @property
     def accepted(self) -> bool:
@@ -492,18 +534,27 @@ def compare(root: Path, template: Template) -> Comparison:
     # A manifest copied by KiCad provides identity/version, but does not prove contents.
     items = []
     for relative, data in template.files.items():
+        kind = template.kind(relative)
         current = read_file(root, relative, MAX_SIZE)
         base = baselines.get(relative)
+        recorded_base = base
         if base is not None:
-            if (not isinstance(base, dict) or base.get('policy') != policy(relative)
+            stored_kind = base.get('policy') if isinstance(base, dict) else None
+            changed_policy = (policy(relative) == 'text'
+                              and (stored_kind, kind) in (('text', 'document'), ('document', 'text')))
+            if (not isinstance(base, dict) or (stored_kind != kind and not changed_policy)
                     or not re.fullmatch(r'[0-9a-f]{64}', str(base.get('hash', '')))):
                 raise SetupError(f'Invalid recorded baseline for {relative}.')
-            if policy(relative) == 'document' and not isinstance(base.get('content'), str):
+            if stored_kind == 'document' and not isinstance(base.get('content'), str):
                 raise SetupError(f'Missing document baseline for {relative}.')
-            if policy(relative) == 'document' and digest(base['content'].encode()) != base['hash']:
+            if stored_kind == 'document' and digest(base['content'].encode()) != base['hash']:
                 raise SetupError(f'Document baseline hash mismatch for {relative}.')
-            if 'choice' in base and (policy(relative) != 'document' or base['choice'] not in ('keep', 'use', 'edit')):
+            if 'choice' in base and (stored_kind != 'document' or base['choice'] not in ('keep', 'use', 'edit')):
                 raise SetupError(f'Invalid recorded document choice for {relative}.')
+            if changed_policy:
+                # Changing ownership needs review; preserve the old record if
+                # this file is deferred while other files are applied.
+                base = None
         incoming = adapted(relative, data, current)
         merged = None
         expected_hash = digest(canonical(relative, incoming if policy(relative) == 'workflow' else data))
@@ -512,7 +563,9 @@ def compare(root: Path, template: Template) -> Comparison:
             status, action = 'Missing required file', 'use'
         elif current_hash == expected_hash:
             status, action = 'Matches', 'keep'
-        elif policy(relative) == 'document':
+            if kind == 'ignore_rules' and project_ignore_patterns(text(current)) != project_ignore_patterns(text(data)):
+                status = ACCEPTED
+        elif kind == 'document':
             if base and base['hash'] == expected_hash:
                 if base.get('choice', 'keep') in ('keep', 'edit'):
                     # Older records already accepted document edits against
@@ -532,7 +585,7 @@ def compare(root: Path, template: Template) -> Comparison:
             status, action = 'Template changed; project unchanged', 'use'
         else:
             status, action = 'Local modifications; review before replacement', 'review'
-        items.append(Item(relative, status, current, incoming, action, base, merged))
+        items.append(Item(relative, status, current, incoming, action, recorded_base, merged, kind))
     extras = tuple(p for p in inventory(root, include_license=LICENSE_FILE in template.files) if p not in template.files)
     return Comparison(root, template, version, manifest_before, state_before, tuple(items), extras)
 
@@ -581,18 +634,25 @@ def prepare_upgrade(comparison: Comparison, choices: dict[str, str], edits: dict
         if item.current is None and choice == 'keep':
             raise SetupError(f'Required file cannot be left missing: {item.path}')
         edited = (edits or {}).get(item.path, item.merged)
-        if choice == 'edit' and (policy(item.path) != 'document' or edited is None):
+        if choice == 'edit' and (not item.editable or edited is None):
             raise SetupError('Only project documentation can be edited in template review.')
+        if choice == 'edit' and item.kind == 'ignore_rules':
+            shared, _ = split_ignore_rules(text(edited), required=True)
+            current_shared, _ = split_ignore_rules(text(item.current or b''))
+            expected_shared = current_shared or split_ignore_rules(text(item.incoming), required=True)[0]
+            if shared != expected_shared:
+                raise SetupError('Only the project section of .gitignore can be edited. '
+                                 'Use template to update the shared rules.')
         after = item.current if choice == 'keep' else (edited if choice == 'edit' else item.incoming)
-        if policy(item.path) == 'document' and choice == 'edit' and b'\r\n' in (item.current or b''):
+        if item.editable and choice == 'edit' and b'\r\n' in (item.current or b''):
             after = text(after).replace('\n', '\r\n').encode()
         if after != item.current:
             changes.append(Change(item.path, item.current, after))
         data = comparison.template.files[item.path]
         if policy(item.path) == 'workflow':
             data = item.incoming
-        files[item.path] = {'policy': policy(item.path), 'hash': digest(canonical(item.path, data))}
-        if policy(item.path) == 'document':
+        files[item.path] = {'policy': item.kind, 'hash': digest(canonical(item.path, data))}
+        if item.kind == 'document':
             files[item.path]['content'] = text(data)
             # A matching document follows the default. Keep/edit of differing
             # content accepts further project edits against this source hash.

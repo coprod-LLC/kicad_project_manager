@@ -7,8 +7,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from project_manager.templates import (ACCEPTED, IGNORE_SHARED, IGNORE_USER, LICENSE_FILE,
-                                       README_SOURCE, STATE, apply_upgrade, compare, load_template,
-                                       prepare_upgrade)
+                                       MANIFEST, README_SOURCE, STATE, apply_upgrade, build_manifest,
+                                       compare, load_template, prepare_upgrade, text)
 from project_manager.yaml_fields import SetupError
 from tests.test_templates import release, template_folder
 
@@ -90,6 +90,126 @@ class ProjectContentTests(unittest.TestCase):
         self.assertEqual(target.read_text(), broken)
         with self.assertRaisesRegex(SetupError, 'project-rules marker'):
             self.publish_ignore(broken, '1.2.0')
+
+    def test_ignore_editor_preserves_shared_rules_newlines_and_backup(self):
+        self.publish_ignore()
+        self.apply({'.gitignore': 'use'})
+        target = self.project / '.gitignore'
+        before = ignore_file().replace('\n', '\r\n').encode()
+        target.write_bytes(before)
+        comparison = self.inspect()
+        item = next(i for i in comparison.items if i.path == '.gitignore')
+        self.assertTrue(item.editable)
+        self.assertEqual(item.editor_text(), '# Local rules\n')
+        edited = item.edited_content('!retained.log\nprivate/\n')
+        backup = apply_upgrade(prepare_upgrade(comparison, {'.gitignore': 'edit'}, {'.gitignore': edited}),
+                               self.storage)
+        self.assertEqual((backup / '.gitignore').read_bytes(), before)
+        self.assertEqual(target.read_bytes(), ignore_file(custom='!retained.log\nprivate/\n').replace('\n', '\r\n').encode())
+        self.assertEqual(self.inspect().colour, 'green')
+        self.assertTrue(next(i for i in self.inspect().items if i.path == '.gitignore').accepted)
+        with self.assertRaisesRegex(SetupError, 'Only the project section'):
+            prepare_upgrade(self.inspect(), {'.gitignore': 'edit'}, {'.gitignore': edited.replace(b'*.log', b'*.secret')})
+
+    def test_removed_custom_rules_return_to_matches_despite_blank_lines_and_comments(self):
+        self.publish_ignore()
+        self.apply({'.gitignore': 'use'})
+        comparison = self.inspect()
+        item = next(i for i in comparison.items if i.path == '.gitignore')
+        apply_upgrade(prepare_upgrade(comparison, {'.gitignore': 'edit'},
+                                      {'.gitignore': item.edited_content('private/\n')}), self.storage)
+        self.assertTrue(next(i for i in self.inspect().items if i.path == '.gitignore').accepted)
+        comparison = self.inspect()
+        item = next(i for i in comparison.items if i.path == '.gitignore')
+        custom = '\n# My explanation\n\n\t\n'
+        apply_upgrade(prepare_upgrade(comparison, {'.gitignore': 'edit'},
+                                      {'.gitignore': item.edited_content(custom)}), self.storage)
+        self.assertEqual(next(i for i in self.inspect().items if i.path == '.gitignore').status, 'Matches')
+        self.assertFalse(self.inspect().customizations)
+        self.assertTrue((self.project / '.gitignore').read_text().endswith(custom))
+
+    def test_ignore_rule_escapes_leading_spaces_and_negation_order_remain_significant(self):
+        self.publish_ignore(ignore_file(custom='*.local\n!keep.local\n'))
+        self.apply({'.gitignore': 'use'})
+        target = self.project / '.gitignore'
+        target.write_text(ignore_file(custom='# Different comment\n\n*.local\n!keep.local\n\n'))
+        self.assertEqual(next(i for i in self.inspect().items if i.path == '.gitignore').status, 'Matches')
+        for custom in ('!keep.local\n*.local\n', '\\#literal\n', ' #literal\n', '\\ \n'):
+            with self.subTest(custom=custom):
+                target.write_text(ignore_file(custom=custom))
+                self.assertTrue(next(i for i in self.inspect().items if i.path == '.gitignore').accepted)
+
+    def test_ignore_edit_does_not_silently_upgrade_changed_shared_rules(self):
+        self.publish_ignore()
+        self.apply({'.gitignore': 'use'})
+        self.publish_ignore(ignore_file('*.log\n*.tmp\n'), '1.2.0')
+        comparison = self.inspect()
+        item = next(i for i in comparison.items if i.path == '.gitignore')
+        apply_upgrade(prepare_upgrade(comparison, {'.gitignore': 'edit'},
+                                      {'.gitignore': item.edited_content('private/\n')}), self.storage)
+        self.assertNotIn('*.tmp', (self.project / '.gitignore').read_text())
+        self.assertEqual(self.inspect().colour, 'amber')
+        self.apply({'.gitignore': 'use'})
+        self.assertEqual((self.project / '.gitignore').read_text(), ignore_file('*.log\n*.tmp\n', 'private/\n'))
+        self.assertEqual(self.inspect().colour, 'green')
+
+    def test_legacy_ignore_edit_adopts_markers_without_losing_old_rules(self):
+        target = self.project / '.gitignore'
+        target.write_text('legacy/\n')
+        self.publish_ignore()
+        comparison = self.inspect()
+        item = next(i for i in comparison.items if i.path == '.gitignore')
+        self.assertEqual(item.editor_text(), 'legacy/\n')
+        apply_upgrade(prepare_upgrade(comparison, {'.gitignore': 'edit'},
+                                      {'.gitignore': item.edited_content(item.editor_text() + 'new/\n')}), self.storage)
+        self.assertEqual(target.read_text(), ignore_file(custom='legacy/\nnew/\n'))
+
+    def test_additional_documents_use_manifest_policy_and_survive_rebuild_and_reopen(self):
+        path = 'kibot_resources/templates/custom_notes.md'
+        (self.template.root / path).write_text('Template notes\n')
+        self.template = release(self.template.root, '1.1.0')
+        self.apply({path: 'use'})
+        # Existing text resources become editable only through a deliberate
+        # manifest policy. Rebuilding preserves that template author's choice.
+        manifest = json.loads(self.template.manifest)
+        manifest['files'][path]['policy'] = 'document'
+        (self.template.root / MANIFEST).write_text(json.dumps(manifest))
+        self.template = release(self.template.root, '1.2.0')
+        self.assertEqual(self.template.kind(path), 'document')
+        (self.project / path).write_text('Existing project notes\n')
+        self.apply({README_SOURCE: 'keep'})
+        self.assertEqual(json.loads((self.project / STATE).read_text())['files'][path]['policy'], 'text')
+        comparison = self.inspect()
+        self.assertEqual(comparison.colour, 'amber')
+        item = next(i for i in comparison.items if i.path == path)
+        self.assertTrue(item.editable)
+        edited = item.edited_content('Project notes\n')
+        apply_upgrade(prepare_upgrade(comparison, {path: 'edit'}, {path: edited}), self.storage)
+        self.template = load_template(self.template.root)
+        self.assertEqual(self.inspect().colour, 'green')
+        self.assertEqual([i.path for i in self.inspect().customizations], [path])
+        self.assertEqual(json.loads((self.project / STATE).read_text())['files'][path]['content'], 'Template notes\n')
+        self.assertEqual((self.project / path).read_text(), text(edited))
+        # Converting a document back to shared text also requires review and
+        # cannot turn its old accepted exception into a shared-file exemption.
+        manifest = json.loads(self.template.manifest)
+        manifest['files'][path]['policy'] = 'text'
+        (self.template.root / MANIFEST).write_text(json.dumps(manifest))
+        self.template = release(self.template.root, '1.3.0')
+        self.assertFalse(next(i for i in self.inspect().items if i.path == path).editable)
+        self.apply({path: 'keep'})
+        self.assertEqual(self.inspect().colour, 'amber')
+        self.apply({path: 'use'})
+        self.assertEqual(self.inspect().colour, 'green')
+
+    def test_manifest_cannot_turn_automation_into_editable_documents(self):
+        manifest = json.loads(self.template.manifest)
+        manifest['files']['kibot_resources/scripts/helper.py']['policy'] = 'document'
+        (self.template.root / MANIFEST).write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(SetupError, 'Unsupported template ownership'):
+            load_template(self.template.root)
+        with self.assertRaisesRegex(SetupError, 'Unsupported template ownership'):
+            build_manifest(self.template.root, 'example.template', '1.1.0')
 
     def test_readme_choice_persists_and_new_template_content_requires_review(self):
         target = self.project / README_SOURCE

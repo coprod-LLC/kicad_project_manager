@@ -95,11 +95,7 @@ def main():
                 else:
                     capture(frame, args.output / 'stackup.png')
                     with TemplateReviewDialog(frame, compare(project, template)) as dialog:
-                        dialog.files.Select(0, False)
-                        for index, item in enumerate(dialog.comparison.items):
-                            if item.path.endswith(('/helper.py', '/assembly_notes.txt')):
-                                dialog.files.Select(index)
-                        dialog._refresh_selection()
+                        dialog.select_path('kibot_resources/templates/assembly_notes.txt')
                         def capture_review():
                             try:
                                 capture(dialog, args.output / 'template-review.png')

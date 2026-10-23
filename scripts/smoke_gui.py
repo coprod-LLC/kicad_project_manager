@@ -19,19 +19,20 @@ if sys.platform == "linux" and os.environ.get("DISPLAY"):
 
 import wx
 
+from project_manager.impedance_table import HEADERS, ImpedanceTable
 from project_manager.context import ContextError, ProjectContext
 from project_manager.ui import FOUND_COLOUR, MISSING_COLOUR, ProjectManagerFrame, _wrap_text
 from project_manager.setup import read_setup
 from project_manager.setup_ui import PreviewDialog, ProjectSetupPanel
 from project_manager.template_ui import (CUSTOM_COLOUR, MATCH_COLOUR, MODIFIED_COLOUR, TemplateDetailsDialog,
-                                        TemplateReviewDialog, item_colour)
-from project_manager.templates import (LICENSE_FILE, README_SOURCE, STATE, apply_upgrade,
+                                        TemplateReviewDialog, item_colour, DIFF_ADDED_COLOUR, DIFF_REMOVED_COLOUR)
+from project_manager.templates import (IGNORE_SHARED, IGNORE_USER, LICENSE_FILE, README_SOURCE, STATE, apply_upgrade,
                                        compare, load_template, prepare_upgrade)
 from project_manager.preferences import load_standards
 from project_manager.settings_ui import StandardsFolderDialog
 from tests.fixtures import sample_project
 from tests.test_templates import release, template_folder
-from tests.standards_fixtures import RULES, detailed_catalog, saved_board
+from tests.standards_fixtures import RULES, STACKUP, catalog_folder, detailed_catalog, saved_board, write_stackup
 
 
 def main() -> int:
@@ -104,6 +105,21 @@ def main() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         assert bitmap.SaveFile(str(path), wx.BITMAP_TYPE_PNG)
 
+    def select_files(dialog, *paths):
+        if paths:
+            dialog.select_path(paths[0])
+        for row in range(dialog.files.GetItemCount()):
+            dialog.files.Select(row, False)
+        for path in paths:
+            index = next(i for i, item in enumerate(dialog.comparison.items) if item.path == path)
+            assert index in dialog.visible_indices, path
+            dialog.files.Select(dialog.visible_indices.index(index))
+        dialog._refresh_selection()
+
+    def choose_action(dialog, value):
+        dialog.action.SetSelection(dialog.actions.index(value))
+        dialog._action_changed(None)
+
     def check_result_colours():
         print('GUI: checking Details colors', flush=True)
         coloured_project = sample_project(base / 'colour-project')
@@ -145,44 +161,288 @@ def main() -> int:
             inspection.Stop()
         assert not failures
         with TemplateReviewDialog(frame, comparison) as dialog:
-            for index, item in enumerate(comparison.items):
-                assert item_colour(item).Get() == expected[item.path].Get()
-                assert dialog.files.GetItemTextColour(index).Get() == expected[item.path].Get()
+            for category in ('documents', 'template'):
+                dialog.show_category(category)
+                for row, index in enumerate(dialog.visible_indices):
+                    item = comparison.items[index]
+                    assert item_colour(item).Get() == expected[item.path].Get()
+                    assert dialog.files.GetItemTextColour(row).Get() == expected[item.path].Get()
 
-    def check_default_readme():
-        print('GUI: checking confirmed README reset and preservation of pending choices', flush=True)
-        source = template_folder(base / 'readme-template')
-        root = base / 'readme-project'
+    def check_document_workspace():
+        print('GUI: checking split workspace, drafts, colored diff and protected ignore editor', flush=True)
+        source = template_folder(base / 'documents-template')
+        (source.root / LICENSE_FILE).write_text('Template licence\n')
+        (source.root / '.gitignore').write_text(
+            f'{IGNORE_SHARED}\n*.log\n\n{IGNORE_USER}\n# Local rules\n')
+        source = release(source.root, '1.1.0')
+        root = base / 'documents-project'
         shutil.copytree(source.root, root)
         target = root / README_SOURCE
         target.write_text('My custom board README source\n')
         (root / 'README.md').write_text('Generated README stays unchanged until CI\n')
-        comparison = compare(root, source)
-        assert comparison.colour == 'amber'
-        with TemplateReviewDialog(frame, comparison,
-                                  apply_plan=lambda plan: apply_upgrade(plan, base / 'readme-backups')) as dialog:
-            assert dialog.default_readme_button.IsEnabled()
-            pending = 'kibot_resources/templates/assembly_notes.txt'
-            dialog.choices[pending] = 'edit'
-            dialog.edits[pending] = b'Unsaved assembly notes\n'
-            before = target.read_bytes()
-            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO) as warning:
-                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.default_readme_button.GetId())
-                dialog.default_readme_button.GetEventHandler().ProcessEvent(event)
-                assert warning.call_count == 1
-                assert 'next CI run will overwrite README.md' in warning.call_args[0][0]
-                assert warning.call_args[0][2] & wx.NO_DEFAULT
-            assert target.read_bytes() == before and not dialog.applied
+        with TemplateReviewDialog(frame, compare(root, source),
+                                  apply_plan=lambda plan: apply_upgrade(plan, base / 'documents-backups')) as dialog:
+            def exercise():
+                try:
+                    assert dialog.category == 'documents'
+                    assert dialog.files.GetItemCount() == 6
+                    assert dialog.splitter.IsSplit()
+                    assert not hasattr(dialog, 'history') and not hasattr(dialog, 'default_readme_button')
+                    dialog.select_path(README_SOURCE)
+                    assert dialog.views.GetSelection() == 0 and dialog.editor.IsEnabled()
+                    assert dialog.editor.GetClientSize().width > 500
+                    dialog.editor.SetValue('My edited board README source\n')
+                    dialog.select_path('kibot_resources/scripts/helper.py')
+                    assert dialog.category == 'template' and dialog.views.GetSelection() == 1
+                    assert not dialog.edit_button.IsShown() and not dialog.editor.IsEnabled()
+                    dialog.search.SetValue('helper.py')
+                    assert dialog.files.GetItemCount() == 1
+                    dialog.search.SetValue('does-not-exist')
+                    assert not dialog.action.IsEnabled() and dialog.selected == -1
+                    dialog.select_path(README_SOURCE)
+                    assert dialog.editor.GetValue() == 'My edited board README source\n'
+                    close_event = wx.CloseEvent(wx.EVT_CLOSE.typeId)
+                    with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO):
+                        dialog._close(close_event)
+                    assert not close_event.GetSkipped()
+                    dialog._show_view(1)
+                    value = dialog.diff.GetValue()
+                    dialog.diff_mode.SetSelection(1)
+                    dialog._diff_mode_changed(None)
+                    assert '+My edited board README source' in dialog.diff.GetValue()
+                    choose_action(dialog, 'keep')
+                    assert 'stay unchanged' in dialog.diff.GetValue()
+                    choose_action(dialog, 'edit')
+                    dialog.diff_mode.SetSelection(0)
+                    dialog._diff_mode_changed(None)
+                    assert dialog.diff.GetValue() == value
+                    for prefix, colour in (('-My custom', DIFF_REMOVED_COLOUR), ('+Company introduction', DIFF_ADDED_COLOUR)):
+                        # Fixtures use their filename as default content.
+                        offset = value.index(prefix)
+                        style = wx.TextAttr()
+                        assert dialog.diff.GetStyle(offset, style)
+                        assert style.GetTextColour().Get() == colour.Get()
+                    wx.CallLater(150, capture_diff)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Document workspace failed')
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            def capture_diff():
+                try:
+                    capture(dialog, args.output.with_name('template-document-diff.png'))
+                    dialog._show_view(0)
+                    pending = 'kibot_resources/templates/assembly_notes.txt'
+                    dialog.select_path(pending)
+                    dialog.editor.SetValue('Deferred assembly notes\n')
+                    choose_action(dialog, 'review')
+                    dialog.select_path('.gitignore')
+                    assert dialog.shared_toggle.IsShown()
+                    assert '*.log' in dialog.shared_rules.GetValue()
+                    assert IGNORE_SHARED not in dialog.editor.GetValue()
+                    dialog.editor.SetValue('!keep.log\nprivate/\n')
+                    dialog.select_path(README_SOURCE)
+                    with patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected warning')):
+                        dialog._apply(None)
+                    assert target.read_text() == 'My edited board README source\n'
+                    assert dialog.comparison.colour == 'green'
+                    assert len(dialog.comparison.customizations) == 2
+                    assert dialog.edits[pending] == b'Deferred assembly notes\n'
+                    assert (root / pending).read_bytes() == source.files[pending]
+                    assert (root / '.gitignore').read_text().endswith('!keep.log\nprivate/\n')
+                    choose_action(dialog, 'use')
+                    before = target.read_bytes()
+                    with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO) as warning:
+                        dialog._apply(None)
+                        assert 'next CI run will overwrite README.md' in warning.call_args[0][0]
+                        assert warning.call_args[0][2] & wx.NO_DEFAULT
+                    assert target.read_bytes() == before
+                    with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.YES):
+                        dialog._apply(None)
+                    assert target.read_bytes() == source.files[README_SOURCE]
+                    assert dialog.edits[pending] == b'Deferred assembly notes\n'
+                    assert (root / 'README.md').read_text() == 'Generated README stays unchanged until CI\n'
+                    assert list((base / 'documents-backups').rglob('readme.txt'))
+                    # Show the editor with a saved customization and a user draft.
+                    dialog.select_path(pending)
+                    wx.CallLater(150, capture_editor)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Document save / default restore failed')
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            def capture_editor():
+                try:
+                    capture(dialog, args.output.with_name('template-documents-editor.png'))
+                    dialog.select_path('.gitignore')
+                    dialog.shared_toggle.SetValue(True)
+                    dialog._toggle_shared_rules(None)
+                    wx.CallLater(150, capture_ignore)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Document editor layout failed')
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            def capture_ignore():
+                try:
+                    assert dialog.ignore_splitter.IsSplit()
+                    height = dialog.ignore_splitter.GetClientSize().height
+                    assert abs(dialog.ignore_splitter.GetSashPosition() - height / 2) < 35
+                    capture(dialog, args.output.with_name('template-ignore-editor.png'))
+                    dialog.editor.SetValue('# No custom patterns remain\n\n')
+                    dialog._apply(None)
+                    item = dialog.comparison.items[dialog.selected]
+                    assert item.path == '.gitignore' and item.status == 'Matches'
+                    row = dialog.visible_indices.index(dialog.selected)
+                    assert dialog.files.GetItemTextColour(row).Get() == MATCH_COLOUR.Get()
+                    assert not dialog.comparison.customizations
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Ignore editor layout failed')
+                finally:
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            wx.CallLater(150, exercise)
+            dialog.ShowModal()
+            assert not failures
+
+    def check_review_refresh():
+        print('GUI: checking safe refresh of external changes and retained drafts', flush=True)
+        source = template_folder(base / 'refresh-template')
+        root = base / 'refresh-project'
+        shutil.copytree(source.root, root)
+        script = 'kibot_resources/scripts/helper.py'
+        with TemplateReviewDialog(frame, compare(root, source)) as dialog:
+            dialog.select_path(README_SOURCE)
+            dialog.editor.SetValue('My unsaved README draft\n')
+            dialog.select_path(script)
+            choose_action(dialog, 'use')
+            (source.root / script).write_text('print("new template")\n')
+            source = release(source.root, '1.1.0')
+            dialog._refresh(None)
+            assert dialog.refreshed and dialog.comparison.template.version == '1.1.0'
+            assert dialog.comparison.items[dialog.selected].path == script
+            assert dialog.choices[script] == 'review'
+            assert dialog.edits[README_SOURCE] == b'My unsaved README draft\n'
+            dialog.select_path(README_SOURCE)
+            (root / README_SOURCE).write_text('External editor saved this README\n')
+            previous = dialog.comparison
+            with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.NO) as question:
+                event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.refresh_button.GetId())
+                dialog.refresh_button.GetEventHandler().ProcessEvent(event)
+                assert question.call_count == 1 and README_SOURCE in question.call_args[0][0]
+            assert dialog.comparison is previous
+            assert dialog.edits[README_SOURCE] == b'My unsaved README draft\n'
             with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.YES):
-                dialog.default_readme_button.GetEventHandler().ProcessEvent(event)
-            assert target.read_bytes() == source.files[README_SOURCE]
-            assert dialog.choices[pending] == 'edit'
-            assert dialog.edits[pending] == b'Unsaved assembly notes\n'
-            assert (root / pending).read_bytes() == source.files[pending]
-            assert (root / 'README.md').read_text() == 'Generated README stays unchanged until CI\n'
-            assert dialog.comparison.colour == 'green'
-            assert 'Changes applied' in dialog.feedback.GetLabel()
-            assert list((base / 'readme-backups').rglob('readme.txt'))
+                dialog._refresh(None)
+            assert README_SOURCE not in dialog.edits
+            assert dialog.editor.GetValue() == 'External editor saved this README\n'
+            assert dialog.choices[README_SOURCE] == 'review'
+
+    def check_impedance_editor():
+        print('GUI: checking impedance cells, non-destructive imports, raw text and save', flush=True)
+        source = template_folder(base / 'impedance-template')
+        path = 'kibot_resources/templates/impedance_table.txt'
+        (source.root / path).write_text(',\t\t'.join(HEADERS) + '\n')
+        source = release(source.root, '1.1.0')
+        root = base / 'impedance-project'
+        shutil.copytree(source.root, root)
+        standards = catalog_folder(base / 'impedance-standards')
+        _, board = saved_board(base / 'impedance-board')
+        target = {'mode': 'differential', 'impedance_ohms': 100, 'geometry': 'microstrip',
+                  'track_width_mm': 0.2146, 'pair_gap_mm': 0.2032, 'layer': 'F.Cu', 'reference_layer': 'B.Cu'}
+        write_stackup(standards / 'stackups/two_layer.json', 'two_layer', 'Matching board', STACKUP,
+                      impedance_targets=[target])
+        with TemplateReviewDialog(frame, compare(root, source),
+                                  apply_plan=lambda plan: apply_upgrade(plan, base / 'impedance-backups'),
+                                  standards_directory=standards, board_file=board) as dialog:
+            def exercise():
+                try:
+                    dialog.select_path(path)
+                    assert dialog.views.GetSelection() == 2
+                    assert dialog.source_button.IsShown() and dialog.edit_button.GetLabel() == 'Table'
+                    panel = dialog.impedance_panel
+                    cell_controls = []
+                    def editor_created(event):
+                        cell_controls.append(event.GetControl())
+                        event.Skip()
+                    panel.grid.Bind(wx.grid.EVT_GRID_EDITOR_CREATED, editor_created)
+                    assert panel.import_button.IsEnabled() and len(panel.presets) == 1
+                    panel._add(None)
+                    manual = ('Manual single-ended', '50', '±5 %', 'L1', '0.3', '', 'L2')
+                    for col, value in enumerate(manual):
+                        panel.grid.SetCellValue(0, col, value)
+                    panel._changed(None)
+                    panel._import(None)
+                    assert panel.grid.GetNumberRows() == 2
+                    assert ImpedanceTable.parse(dialog.edits[path].decode()).rows[0] == manual
+                    panel._import(None)
+                    assert panel.grid.GetNumberRows() == 2
+                    dialog.select_path(README_SOURCE)
+                    dialog.select_path(path)
+                    assert panel.grid.GetCellValue(0, 0) == 'Manual single-ended'
+                    dialog._show_view(2)
+                    assert '\t' not in dialog.editor.GetValue()
+                    dialog._show_view(0)
+                    # Make a real in-progress grid edit, then change files.
+                    panel.grid.SetGridCursor(0, 4)
+                    panel.grid.EnableCellEditControl()
+                    assert cell_controls
+                    cell_controls[-1].SetValue('0.32')
+                    dialog.select_path(README_SOURCE)
+                    assert ImpedanceTable.parse(dialog.edits[path].decode()).rows[0][4] == '0.32'
+                    dialog.select_path(path)
+                    dialog._apply(None)
+                    assert len(ImpedanceTable.parse((root / path).read_text()).rows) == 2
+                    assert dialog.comparison.colour == 'green'
+                    assert next(item for item in dialog.comparison.items if item.path == path).accepted
+                    wx.CallLater(150, capture_table)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Impedance editor failed')
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            def capture_table():
+                try:
+                    capture(dialog, args.output.with_name('template-impedance-table.png'))
+                    # A row deletion is staged and can be viewed as a colored plan.
+                    panel = dialog.impedance_panel
+                    panel.grid.SetGridCursor(1, 0)
+                    panel._delete(None)
+                    assert panel.grid.GetNumberRows() == 1
+                    dialog._show_view(1)
+                    dialog.diff_mode.SetSelection(1)
+                    dialog._diff_mode_changed(None)
+                    assert '-Differential microstrip' in dialog.diff.GetValue()
+                    def cancel_preview():
+                        previews = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
+                        assert len(previews) == 1
+                        control = previews[0].diff
+                        value = control.GetValue()
+                        offset = value.index('-Differential microstrip')
+                        style = wx.TextAttr()
+                        assert control.GetStyle(offset, style)
+                        assert style.GetTextColour().Get() == DIFF_REMOVED_COLOUR.Get()
+                        capture(previews[0], args.output.with_name('template-colored-preview.png'))
+                        previews[0].EndModal(wx.ID_CANCEL)
+                    wx.CallLater(150, cancel_preview)
+                    dialog._preview(None)
+                    assert len(ImpedanceTable.parse((root / path).read_text()).rows) == 2
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Impedance preview/delete failed')
+                finally:
+                    dialog.EndModal(wx.ID_CANCEL)
+
+            wx.CallLater(150, exercise)
+            dialog.ShowModal()
+            assert not failures
+        # With no linked standards folder the table is still editable, and
+        # importing is absent. Unknown documents keep the ordinary text editor.
+        with TemplateReviewDialog(frame, compare(root, source)) as dialog:
+            dialog.select_path(path)
+            assert not dialog.impedance_panel.import_panel.IsShown()
+            assert dialog.views.GetSelection() == 2
 
     def check_accepted_license():
         print('GUI: checking blue licence choice after reopen, then confirmed restore', flush=True)
@@ -202,12 +462,9 @@ def main() -> int:
         # Create a new dialog from the files on disk, without reusing its choices.
         with TemplateReviewDialog(frame, compare(root, load_template(source.root)),
                                   apply_plan=lambda plan: apply_upgrade(plan, storage)) as dialog:
-            index = next(i for i, item in enumerate(dialog.comparison.items) if item.path == LICENSE_FILE)
-            for row in dialog._selected_indices():
-                dialog.files.Select(row, False)
-            dialog.files.Select(index)
-            dialog._refresh_selection()
-            assert dialog.files.GetItemTextColour(index).Get() == CUSTOM_COLOUR.Get()
+            dialog.select_path(LICENSE_FILE)
+            row = dialog.visible_indices.index(dialog.selected)
+            assert dialog.files.GetItemTextColour(row).Get() == CUSTOM_COLOUR.Get()
             assert dialog.choices[LICENSE_FILE] == 'keep'
             assert 'My project licence' in dialog.diff.GetValue()
             assert dialog.comparison.colour == 'green'
@@ -222,7 +479,7 @@ def main() -> int:
             with patch('project_manager.template_ui.wx.MessageBox', return_value=wx.YES):
                 dialog._apply(None)
             assert target.read_text() == 'Template licence\n'
-            assert dialog.files.GetItemTextColour(index).Get() == MATCH_COLOUR.Get()
+            assert dialog.files.GetItemTextColour(row).Get() == MATCH_COLOUR.Get()
             assert 'Matches installed template' in dialog.intro.GetLabel()
             assert list(storage.rglob(LICENSE_FILE))
 
@@ -279,19 +536,16 @@ def main() -> int:
             dialogs = [w for w in wx.GetTopLevelWindows() if isinstance(w, TemplateReviewDialog) and w.IsModal()]
             assert len(dialogs) == 1
             dialog = dialogs[0]
-            for row in range(dialog.files.GetItemCount()):
-                dialog.files.Select(row)
-            dialog._refresh_selection()
-            dialog.action.SetSelection(dialog.actions.index('use'))
-            dialog._action_changed(None)
-            for row in range(dialog.files.GetItemCount()):
-                dialog.files.Select(row, False)
-            index = next(i for i, item in enumerate(dialog.comparison.items)
-                         if item.path.endswith('/assembly_notes.txt'))
-            dialog.files.Select(index)
-            dialog._load(index)
+            for category in ('documents', 'template'):
+                dialog.show_category(category)
+                for row in range(dialog.files.GetItemCount()):
+                    dialog.files.Select(row)
+                dialog._refresh_selection()
+                choose_action(dialog, 'use')
+            document = 'kibot_resources/templates/assembly_notes.txt'
+            dialog.select_path(document)
             dialog.editor.SetValue('Project-specific assembly notes\n')
-            assert dialog.choices[dialog.comparison.items[index].path] == 'edit'
+            assert dialog.choices[document] == 'edit'
             capture(dialog, args.output.with_name('template-review.png'))
             with patch('project_manager.template_ui.PreviewDialog', side_effect=AssertionError('Unexpected preview')):
                 event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.apply_button.GetId())
@@ -307,7 +561,7 @@ def main() -> int:
         frame._review_template(None)
 
     def check_review_selection():
-        print('GUI: checking range selection, bulk actions and partial apply', flush=True)
+        print('GUI: checking filtered range selection, partial apply and deferred drafts', flush=True)
         source = template_folder(base / 'selection-template')
         project = base / 'selection-project'
         shutil.copytree(source.root, project)
@@ -320,126 +574,94 @@ def main() -> int:
         (project / document).write_text('Project notes\n')
         (project / missing).unlink()
         comparison = compare(project, source)
-        indices = {item.path: index for index, item in enumerate(comparison.items)}
-        with TemplateReviewDialog(frame, comparison) as dialog:
-            def select(*rows):
-                for row in dialog._selected_indices():
-                    dialog.files.Select(row, False)
-                for row in rows:
-                    dialog.files.Select(row)
-                dialog._refresh_selection()
+        applied_plans = []
+        def apply_preview(plan):
+            applied_plans.append(plan)
+            return apply_upgrade(plan, base / 'selection-backups')
+        with TemplateReviewDialog(frame, comparison, apply_plan=apply_preview) as dialog:
+            def exercise():
+                try:
+                    assert not dialog.files.HasFlag(wx.LC_SINGLE_SEL)
+                    select_files(dialog, document)
+                    dialog.editor.SetValue('Edited project notes\n')
+                    # A stale single-file edit event must not spread a draft
+                    # over another selected document before deferred refresh.
+                    other = README_SOURCE
+                    other_index = next(i for i, item in enumerate(comparison.items) if item.path == other)
+                    dialog.files.Select(dialog.visible_indices.index(other_index))
+                    choose_action(dialog, 'edit')
+                    assert dialog.edits[document] == b'Edited project notes\n'
+                    assert dialog.choices[other] == 'keep' and other not in dialog.edits
+                    assert not dialog.editor.IsEnabled() and 'edit' not in dialog.actions
+                    select_files(dialog, theme, script)
+                    assert dialog.selection_label.GetLabel() == '2 selected files'
+                    assert 'edit' not in dialog.actions
+                    choose_action(dialog, 'use')
+                    assert dialog.choices[theme] == dialog.choices[script] == 'use'
+                    # Include a missing file: Keep must disappear for the batch.
+                    index = next(i for i, item in enumerate(comparison.items) if item.path == missing)
+                    dialog.files.Select(dialog.visible_indices.index(index))
+                    dialog._refresh_selection()
+                    assert 'keep' not in dialog.actions
+                    choose_action(dialog, 'review')
+                    assert all(dialog.choices[path] == 'review' for path in (theme, script, missing))
+                    select_files(dialog, theme)
+                    choose_action(dialog, 'use')
+                    select_files(dialog)
+                    assert not dialog.action.IsEnabled()
+                    select_files(dialog, theme, script)
+                    wx.CallLater(150, preview)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Filtered selection failed')
+                    dialog.EndModal(wx.ID_CANCEL)
 
-            def action(value):
-                dialog.action.SetSelection(dialog.actions.index(value))
-                dialog._action_changed(None)
+            def preview():
+                try:
+                    capture(dialog, args.output.with_name('template-bulk-selection.png'))
+                    def accept_preview():
+                        previews = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
+                        assert len(previews) == 1
+                        capture(previews[0], args.output.with_name('template-partial-preview.png'))
+                        previews[0].EndModal(wx.ID_OK)
+                    wx.CallLater(150, accept_preview)
+                    with patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected error')):
+                        dialog._preview(None)
+                    assert dialog.IsModal(), 'Preview Apply closed template review'
+                    assert dialog.applied and len(applied_plans) == 1
+                    assert 'Changes applied' in dialog.feedback.GetLabel()
+                    assert (project / document).read_text() == 'Edited project notes\n'
+                    dialog.EndModal(wx.ID_CANCEL)
+                except Exception:
+                    traceback.print_exc()
+                    failures.append('Partial preview failed')
+                    dialog.EndModal(wx.ID_CANCEL)
 
-            def guard(callback):
-                def run():
-                    try:
-                        callback()
-                    except Exception:
-                        traceback.print_exc()
-                        failures.append('Template selection / partial apply failed')
-                        dialog.EndModal(wx.ID_CANCEL)
-                return run
-
-            def start_range():
-                assert not dialog.files.HasFlag(wx.LC_SINGLE_SEL)
-                for path in (theme, script, document, missing):
-                    assert dialog.choices[path] == 'review', path
-                select(0)
-                # Let native selection events update the action controls before
-                # checking the range. Keyboard/mouse simulation depends on the
-                # desktop granting focus, which headless CI does not guarantee.
-                dialog.files.Select(1)
-                wx.CallLater(150, guard(check_range))
-
-            def check_range():
-                assert dialog._selected_indices() == [0, 1], dialog._selected_indices()
-                assert dialog.selection_label.GetLabel() == '2 selected files:'
-                assert 'edit' not in dialog.actions
-                action('use')
-                assert all(dialog.choices[comparison.items[row].path] == 'use' for row in (0, 1))
-                assert dialog.choices[script] == 'review'
-                dialog.files.Select(indices[missing])
-                dialog._refresh_selection()
-                assert 'keep' not in dialog.actions
-                action('review')
-                assert all(dialog.choices[comparison.items[row].path] == 'review'
-                           for row in dialog._selected_indices())
-
-                select(indices[document])
-                dialog.editor.SetValue('Edited project notes\n')
-                assert dialog.choices[document] == 'edit'
-                dialog.files.Select(indices[script])
-                # An action arriving before deferred selection refresh must not
-                # spread the previous single-document editor across the range.
-                action('edit')
-                assert dialog.choices[script] == 'review'
-                assert not dialog.editor.IsEnabled()
-                assert 'edit' not in dialog.actions
-                assert dialog.action.GetSelection() == wx.NOT_FOUND
-                assert dialog.edits[document] == b'Edited project notes\n'
-                select(indices[document])
-                assert dialog.editor.GetValue() == 'Edited project notes\n'
-
-                select(indices[theme])
-                action('use')
-                select()
-                assert not dialog.action.IsEnabled()
-                assert not dialog.editor.IsEnabled()
-                select(indices[theme], indices[document])
-                capture(dialog, args.output.with_name('template-bulk-selection.png'))
-
-                def accept_preview():
-                    previews = [w for w in wx.GetTopLevelWindows() if isinstance(w, PreviewDialog) and w.IsModal()]
-                    assert len(previews) == 1
-                    capture(previews[0], args.output.with_name('template-partial-preview.png'))
-                    previews[0].EndModal(wx.ID_OK)
-
-                wx.CallLater(150, accept_preview)
-                with patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected error')):
-                    dialog._preview(None)
-
-            wx.CallLater(150, guard(start_range))
-            assert dialog.ShowModal() == wx.ID_OK
-            plan = dialog.plan
+            wx.CallLater(150, exercise)
+            assert dialog.ShowModal() == wx.ID_CANCEL
+            plan = applied_plans[0]
             assert {change.relative for change in plan.changes} == {theme, document, STATE}
-        apply_upgrade(plan, base / 'selection-backups')
         assert (project / theme).read_bytes() == source.files[theme]
         assert (project / document).read_text() == 'Edited project notes\n'
         assert (project / script).read_text() == 'print("project override")\n'
         assert not (project / missing).exists()
-        pending = {item.path for item in compare(project, source).problems}
-        assert pending == {script, missing}, pending
-
-        print('GUI: applying consecutive batches without closing template review', flush=True)
+        assert {item.path for item in compare(project, source).problems} == {script, missing}
         storage = base / 'direct-template-backups'
         verified = []
-
-        def apply_direct(plan):
-            return apply_upgrade(plan, storage, verify=lambda: verified.append(True))
-
-        with TemplateReviewDialog(frame, compare(project, source), apply_plan=apply_direct) as dialog:
-            def check_direct_apply():
+        with TemplateReviewDialog(frame, compare(project, source), apply_plan=lambda plan:
+                                  apply_upgrade(plan, storage, verify=lambda: verified.append(True))) as dialog:
+            def exercise_apply():
                 try:
                     assert dialog.apply_button.GetScreenRect().x > dialog.preview_button.GetScreenRect().right
-
-                    def choose(path, value):
-                        for row in dialog._selected_indices():
-                            dialog.files.Select(row, False)
-                        dialog.files.Select(indices[path])
-                        dialog._refresh_selection()
-                        dialog.action.SetSelection(dialog.actions.index(value))
-                        dialog._action_changed(None)
-
+                    def choose(path, action):
+                        dialog.select_path(path)
+                        choose_action(dialog, action)
                     def click_apply():
                         with patch('project_manager.template_ui.PreviewDialog', side_effect=AssertionError('Unexpected preview')), \
-                             patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected error')):
+                             patch('project_manager.template_ui.wx.MessageBox', side_effect=AssertionError('Unexpected warning')):
                             event = wx.CommandEvent(wx.EVT_BUTTON.typeId, dialog.apply_button.GetId())
                             dialog.apply_button.GetEventHandler().ProcessEvent(event)
-                        assert dialog.IsModal(), 'Direct Apply closed the review window'
-
+                        assert dialog.IsModal()
                     choose(document, 'edit')
                     dialog.editor.SetValue('Deferred document edit\n')
                     choose(document, 'review')
@@ -447,12 +669,9 @@ def main() -> int:
                     click_apply()
                     assert dialog.applied and verified
                     assert (project / script).read_bytes() == source.files[script]
-                    assert not (project / missing).exists()
-                    assert dialog.choices[missing] == 'review'
-                    assert dialog.choices[document] == 'review'
+                    assert dialog.choices[missing] == dialog.choices[document] == 'review'
                     assert dialog.edits[document] == b'Deferred document edit\n'
                     assert (project / document).read_text() == 'Edited project notes\n'
-                    assert next(item for item in dialog.comparison.items if item.path == script).status == 'Matches'
                     backups = list(storage.rglob('manifest.json'))
                     click_apply()
                     assert list(storage.rglob('manifest.json')) == backups
@@ -460,16 +679,16 @@ def main() -> int:
                     click_apply()
                     assert (project / missing).read_bytes() == source.files[missing]
                     assert not dialog.comparison.problems
-                    capture(dialog, args.output.with_name('template-direct-apply.png'))
+                    wx.CallLater(150, finish)
                 except Exception:
                     traceback.print_exc()
                     failures.append('Direct template Apply failed')
-                finally:
                     dialog.EndModal(wx.ID_CANCEL)
-
-            wx.CallLater(150, check_direct_apply)
-            assert dialog.ShowModal() == wx.ID_CANCEL
-            assert dialog.applied
+            def finish():
+                capture(dialog, args.output.with_name('template-direct-apply.png'))
+                dialog.EndModal(wx.ID_CANCEL)
+            wx.CallLater(150, exercise_apply)
+            assert dialog.ShowModal() == wx.ID_CANCEL and dialog.applied
 
     def assert_template_layout():
         label = frame.template_label.GetScreenRect()
@@ -522,7 +741,8 @@ def main() -> int:
                 frame.refresh_button.GetEventHandler().ProcessEvent(event)
             elif phase == 1:
                 assert frame._context is None
-                assert frame.fields["board_file"].GetValue() == "—"
+                assert 'board_file' not in frame.fields
+                assert frame.fields["project_file"].GetValue() == "—"
                 assert "Test connection interruption" in frame.log.GetValue()
                 assert not frame.setup_panel.preview_button.IsEnabled()
                 assert not frame.setup_panel.apply_button.IsEnabled()
@@ -582,7 +802,9 @@ def main() -> int:
                 assert read_setup(project).workflow is None
                 check_result_colours()
                 check_ci_version_migration()
-                check_default_readme()
+                check_document_workspace()
+                check_review_refresh()
+                check_impedance_editor()
                 check_accepted_license()
                 check_review_selection()
                 review_template()

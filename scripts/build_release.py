@@ -26,7 +26,8 @@ PAYLOAD = (
     "project_manager/stackup_save.py", "project_manager/stackup_save_ui.py",
     "project_manager/sexpr.py", "project_manager/json_text.py",
     "project_manager/instance.py",
-    "project_manager/templates.py", "project_manager/template_ui.py",
+    "project_manager/templates.py", "project_manager/template_ui.py", "project_manager/diff_ui.py",
+    "project_manager/impedance_table.py", "project_manager/impedance_ui.py",
     "resources/icon.png",
 )
 

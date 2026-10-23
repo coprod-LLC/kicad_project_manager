@@ -17,7 +17,7 @@ rules and PCB stackups. Use your own compatible templates and standards folders.
    Open the plugin from its toolbar button or **Tools → External Plugins**.
 
 Alternatively, install the packaged ZIP from [Releases](https://github.com/coprod-LLC/kicad_project_manager/releases).
-Version **1.0.1** is a stable release for KiCad 9 and 10. When upgrading from a
+Version **1.1.0** is the current stable release for KiCad 9 and 10. When upgrading from a
 previous package identity, uninstall that copy first; the package ID is
 `org.kicadprojectmanager.plugin`. Unlink source installations before installing
 the PCM package. For manual clone/symlink setup, see [development installation](docs/development.md#development-installation).
@@ -31,15 +31,25 @@ the PCM package. For manual clone/symlink setup, see [development installation](
 | **Design Rules** | Select a rule profile, compare constraints and custom rules, then apply. |
 | **Stackup** | Compare saved and proposed constructions, adjust appearance, apply a preset or save an unmatched saved construction as a new preset. |
 
-In **Review upgrade…**, Shift-click a range or Ctrl-click individual files, then
-choose an action for the selection. **Apply**, beside **Preview Apply…**, saves
-directly and keeps the review window open. Undecided files stay pending.
-**Apply default README…** resets `readme.txt` after confirmation; the next CI run
-regenerates `README.md`. Accepted custom documents appear blue and keep the overall
-status green. **Keep project → Apply** remembers the choice in the project's
-review record; **Use template** restores the default after confirmation and backup.
-For templates with a managed `.gitignore`, updates preserve the project section
-at the end, including `!pattern` overrides.
+In **Review upgrade…**, **Project documents** groups editable notes, README
+sources, licences and project ignore rules. **Template
+files** contains shared automation and resources. Drag the divider to resize the
+file list and the editor/diff workspace. **Changes** distinguishes a reference
+comparison from the selected action's planned changes. Apply previews use the
+same red/green coloring. **Refresh** reloads files while retaining compatible
+drafts.
+Shift-click a range or Ctrl-click individual files to choose a batch action.
+**Apply** saves chosen actions across both lists and keeps the window open,
+including after **Preview Apply…**. Undecided files stay pending. Drafts survive switching files and filters.
+
+Accepted custom documents appear blue and keep the overall status green.
+**Keep project → Apply** remembers the choice; **Use template → Apply** restores
+the default after confirmation and backup. For `readme.txt`, the next CI run
+regenerates `README.md`. The managed `.gitignore` editor exposes only the project
+section, including `!pattern` overrides; **Use template** updates shared rules.
+The standard impedance document opens as an editable table, with raw Text available.
+When standards are linked, import adds missing guidance matching the saved board;
+manual rows are preserved and geometry conflicts are reported.
 
 Save the project and close PCB/schematic editors before **applying standards**;
 reopen afterward. Changes use local backups and reject intervening edits. Template

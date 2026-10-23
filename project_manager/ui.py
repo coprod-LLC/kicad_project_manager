@@ -72,7 +72,7 @@ class ProjectManagerFrame(wx.Frame):
         self.fields: dict[str, wx.TextCtrl] = {}
         for key, label in [
             ("project_name", "Project"), ("project_file", "Project file"),
-            ("board_file", "Board file"), ("kicad_version", "KiCad version"),
+            ("kicad_version", "KiCad version"),
         ]:
             grid.Add(wx.StaticText(box.GetStaticBox(), label=label), 0, wx.ALIGN_CENTER_VERTICAL)
             field = wx.TextCtrl(box.GetStaticBox(), value="—", style=wx.TE_READONLY | wx.BORDER_NONE)
@@ -346,7 +346,7 @@ class ProjectManagerFrame(wx.Frame):
             self.setup_panel.clear(error or 'Project unavailable. Click Refresh to reconnect.')
             self._append_log(error or "No project was returned.")
             return
-        for key in ("project_name", "project_file", "board_file", "kicad_version"):
+        for key in ("project_name", "project_file", "kicad_version"):
             value = getattr(context, key) or "No project file (standalone board)"
             self.fields[key].ChangeValue(value)
             self.fields[key].SetToolTip(value)
@@ -420,6 +420,7 @@ class ProjectManagerFrame(wx.Frame):
         if self._busy or not self.template_comparison or not self._can_discard():
             return
         applied = False
+        refreshed = False
 
         def apply_review(plan):
             nonlocal applied
@@ -430,13 +431,16 @@ class ProjectManagerFrame(wx.Frame):
 
         try:
             comparison = compare(self.template_comparison.root, load_template(self.template_source))
-            with TemplateReviewDialog(self, comparison, apply_plan=apply_review) as dialog:
-                if dialog.ShowModal() == wx.ID_OK:
-                    apply_review(dialog.plan)
+            standards = load_standards(self.storage)
+            with TemplateReviewDialog(self, comparison, apply_plan=apply_review,
+                                      standards_directory=Path(standards) if standards else None,
+                                      board_file=Path(self._context.board_file) if self._context.board_file else None) as dialog:
+                dialog.ShowModal()
+                refreshed = dialog.refreshed
         except (SetupError, OSError) as exc:
             wx.MessageBox(str(exc), 'Template upgrade', wx.OK | wx.ICON_ERROR, self)
         finally:
-            if applied:
+            if applied or refreshed:
                 self.refresh(discard=True)
 
     def _on_applied(self, backup: Path | None):

@@ -9,6 +9,7 @@ import wx.lib.scrolledpanel
 
 from .setup import METADATA, STATUSES, Plan, Snapshot, apply, prepare, suggested_kicad_major
 from .yaml_fields import SetupError
+from .diff_ui import show_diff
 
 
 class PreviewDialog(wx.Dialog):
@@ -19,9 +20,10 @@ class PreviewDialog(wx.Dialog):
         label = wx.StaticText(self, label=intro or 'Apply these changes to the active project? Original files will be backed up locally.')
         label.Wrap(800)
         layout.Add(label, 0, wx.ALL, 14)
-        diff = wx.TextCtrl(self, value=plan.diff(), style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
-        diff.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
-        layout.Add(diff, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
+        self.diff = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL | wx.TE_RICH2)
+        self.diff.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
+        show_diff(self.diff, plan.diff())
+        layout.Add(self.diff, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 14)
         buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         self.FindWindow(wx.ID_OK).SetLabel('Apply Changes')
         layout.Add(buttons, 0, wx.EXPAND | wx.ALL, 14)

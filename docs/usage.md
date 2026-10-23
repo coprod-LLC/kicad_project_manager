@@ -49,27 +49,71 @@ the project marker. When adopting an older, unmarked project `.gitignore`, all
 its existing rules are retained in the project section for review. Later project
 rules can override shared rules; Git requires ignored parent folders to be
 re-included before their children. Older templates without these markers still
-work and do not manage `.gitignore`.
+work and do not manage `.gitignore`. Customization status compares project
+patterns in order, ignoring comments and blank lines. Removing your added rules
+returns the row to green without rewriting your explanatory comments.
 
 Templates may also include root `LICENSE` as a reviewed document. It uses the
 same file list and **Keep project / Use template** actions as README sources and
 notes. Older manifests that did not manage this file remain supported. The
 licence text always comes from the selected template.
 
-**Review adoption…** / **Review upgrade…** shows matches in green, accepted custom
-documents in blue, differences needing review in amber and missing files in red,
-with text labels. Matching and accepted files start at **Keep
-project**; differences start at **Choose action…**. Shift-click selects a range;
-Ctrl-click adds individual files. The action list offers choices valid for the
-whole selection. **Keep project** accepts existing content, **Use template**
-replaces it, and **Choose action…** leaves the file pending.
+**Review adoption…** / **Review upgrade…** opens **Project documents** by default.
+The left file list contains editable notes, README sources, `LICENSE` and managed
+`.gitignore` files. **Template files** switches to shared YAML, scripts, fonts,
+logos and other resources. Search filters the active list; the full path appears
+above the selected file. Drag the vertical divider to give the editor more space.
 
-Select one project document to edit it. The four supported document sources are
-`fabrication_notes.txt`, `assembly_notes.txt`, `impedance_table.txt` and
-`readme.txt` under `kibot_resources/templates/`. Prior document baselines and
-non-overlapping three-way merge proposals help reconcile incoming guidance.
-Keeping a document accepts that release’s baseline; kept shared-file differences
-continue to appear as local modifications.
+Matches appear green, accepted customizations blue, differences needing review
+amber and missing files red, with text labels. Matching and accepted files start
+at **Keep project**; differences start at **Leave pending**. Shift-click selects
+a range; Ctrl-click (Command on Mac) adds files. The action list offers choices
+valid for the whole selection: **Keep project**, **Use template**, **Save edits**
+for a single editable file, or **Leave pending**. Pending files stay unchanged.
+
+A document opens in **Edit**. Typing stages **Save edits**; nothing is written
+until Apply. The four standard sources are `fabrication_notes.txt`,
+`assembly_notes.txt`, `impedance_table.txt` and `readme.txt` under
+`kibot_resources/templates/`. Templates can declare additional plain documents
+in their manifest. For `.gitignore`, edit only the project section; the shared
+rules can be expanded for reading in a draggable 50/50 horizontal split. Saving project rules never silently upgrades
+an outdated shared section: choose **Use template** for that update.
+
+**Changes → Compare with template** is a reference comparison: red lines exist
+only in the saved project, green lines only in the installed template. These
+colors describe differences; they do not decide what Apply writes.
+**Changes → Changes to apply** follows the selected action: Keep project and
+Leave pending do not rewrite the file; Use template and Save edits show their
+planned removals/additions. **Preview Apply…** shows all planned writes in color,
+including staged document edits and review records.
+
+Drafts and actions survive switching lists, files and search filters. **Refresh**
+reloads both the project and installed template. Choices/drafts are retained for
+unchanged files; changed files are rechecked. If a changed file has your draft,
+refresh asks before discarding that draft. Cancel leaves the review intact.
+Stored document baselines still support non-overlapping three-way merge proposals;
+they no longer occupy a separate tab. Kept shared-file differences remain visible.
+
+The standard seven-column impedance document opens in **Table**. Edit cells and
+use **Add row** / **Delete selected rows**; padding and tabs are unnecessary.
+**Text** exposes its comma-separated source. Other headings or malformed CSV keep
+the ordinary text editor, so different templates remain usable. Applying saves
+the same text document, with CSV quoting and ordinary newlines.
+
+If a standards folder is linked, **Add missing profiles** offers only presets
+whose copper/dielectric construction matches the saved PCB. Save board changes
+before importing. Import rereads the standards and board, appends missing targets
+and preserves existing rows, including manual 50 Ω entries and tolerances. If
+an existing target on the same signal/reference layers has a different width or
+gap, it stays unchanged and the conflict is reported. Equivalent numeric/layer
+spellings do not create duplicate rows. Missing source layers are reported;
+missing impedance tolerances remain blank. Guidance does not calculate impedances
+or modify routing, netclasses, the PCB, or the standards repository.
+
+Put reusable new targets in that preset's `impedance_targets` in the standards
+repo, then Refresh and add missing profiles. No match leaves import disabled;
+the manual table remains editable. Multiple matching presets require a selection;
+the importer does not offer guidance from different saved-board constructions.
 
 Choose **Keep project → Apply** to accept a custom document. The choice and
 reviewed template content are saved in `kibot_resources/project_manager/project.json`;
@@ -87,21 +131,21 @@ that restored default need a new Keep decision. Editing a document in the review
 window and applying it also records an accepted customization. Shared automation
 files and the shared `.gitignore` section still flag differences even when kept.
 
-**Apply default README…** is a shortcut that replaces only
-`kibot_resources/templates/readme.txt`, after an overwrite warning, and keeps any
-other pending review choices. Its previous content is backed up. The next CI run
-regenerates root `README.md`; you can edit the source again afterwards. Missing
-README sources are still reported because KiBot needs the file to generate it.
+To restore a default README, select `readme.txt` in **Project documents** and
+choose **Use template → Apply**. Its previous content is backed up after an
+overwrite warning. CI regenerates root `README.md` on its next run; you can edit
+the source again afterwards. Missing README sources remain required.
 
 **Apply** saves directly and keeps review open with refreshed results. Repeat it
 for another batch. **Preview Apply…** shows the writes; accepting that preview
-applies and closes review. Closing review retains anything already applied.
+applies the reviewed plan and keeps review open too. Closing review retains anything already applied. Unapplied drafts stay only in
+this window; save them before closing.
 Undecided files keep their contents and previous baselines. The recorded template
 version identifies the reviewed source; outstanding differences still determine
 whether the project matches. Commit the records in
 `kibot_resources/project_manager/` with the project.
 
-![Template review with bulk selection and direct Apply](screenshots/template-review.png)
+![Template review with a resizable document editor](screenshots/template-review.png)
 
 ## Project Setup
 
